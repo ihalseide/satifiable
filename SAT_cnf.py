@@ -417,54 +417,7 @@ def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> d
     # Return the assignments
     return assignments
 
-def values_of_literals(clause: Clause, assignments: dict) -> dict[int, int|None]:
-    '''
-    Helper function to assign and get literal values of the current clause
 
-    Return a dictionary of literal and value pairs
-    '''
-    # Dictionary to hold the mapping of the literal to it's value
-    literal_and_assignment = dict()
-
-    # Loop through the literals to assign the values of the literal appropriately
-    # Set the current_literal to the current index of the literal
-    for current_literal, polarity in clause.var_polarities().items():
-
-        # If the literal is negative AND it's assigned as a 1,
-        # Assign the complement 0
-        if polarity == NEG_LIT and assignments[current_literal] == POS_LIT:
-            literal_and_assignment[current_literal] = NEG_LIT
-
-        # If the literal is negative AND it's assigned as a 0,
-        # Assign the complement 1
-        elif polarity == NEG_LIT and assignments[current_literal] == NEG_LIT:
-            literal_and_assignment[current_literal] = POS_LIT
-    
-        # If the literal is positive, keep the current assignment
-        else:
-            literal_and_assignment[current_literal] = assignments[current_literal]
-
-    # Return literal assignments
-    return literal_and_assignment
-
-
-def all_undecided(clauses:list[Clause]) -> dict[int, int|None]:
-    '''
-    Helper function for dpll() to create initial assignments where each variable is undecided.
-    (So each xi is set to None.)
-    '''
-    assignments: dict[int, int|None] = dict()
-    if not clauses:
-        # Special case for no clauses
-        return assignments
-    # Initialize the assignments dictionary to have all variables undecided.
-    max_var_i = find_maximum_literal(clauses)
-    for i in range(1, max_var_i + 1):
-        assignments[i] = None
-    return assignments
-
-
-def dpll_rec(clauses: list[Clause], assignments: dict[int,Any]|None=None) -> dict[int,int|None]:
     '''
     The recursive function implementation for dpll().
     Takes in a list of CNF clauses and a dictionary of decisions.
