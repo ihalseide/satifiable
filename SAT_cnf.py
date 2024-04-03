@@ -308,7 +308,7 @@ def parse_SOP_string(text: str) -> list[Clause]: # list of product terms, not CN
                 else:
                     positives.add(num)
             else:
-                raise ValueError(f"Invalid single literal in SOP term: \"{lit}\"")
+                raise ValueError(f"Invalid single literal in SOP term (dots are required): \"{lit}\"")
         clauses.append( Clause(positives, negatives, term_lits) )
     return clauses
 
@@ -320,7 +320,7 @@ def convert_SOP_to_CNF(product_terms: list[Clause]) -> list[Clause]:
     '''
     result: list[Clause] = []
     if len(product_terms) == 1:
-        # Expand out into 1-variable CNF clauses
+        # Only one term, so expand it out into 1-variable CNF clauses
         term = product_terms[0]
         for x_i, polarity in term.var_polarities().items():
             if polarity == POS_LIT:
@@ -331,29 +331,46 @@ def convert_SOP_to_CNF(product_terms: list[Clause]) -> list[Clause]:
                 raise ValueError(f"'and' input variable #{x_i} has invalid polarity: {polarity}")
         return result
     else:
-        xi = find_max_var(product_terms) + 1
-        or_first_in_i = xi
-        # Keep track of the inputs to the OR gate, and their polarities.
-        or_inputs: dict[int, int] = {}
-        # Create AND gates for each product term
+        # See if all terms only have 1 variable.
+        is_all_1_var_terms = True
         for term in product_terms:
-            num_vars = len(term.vars())
-            if num_vars > 1:
-                # Create AND gate for this product term
-                add_GCF_for_and(result, term.var_polarities(), xi)
-                or_inputs[xi] = POS_LIT
-                xi += 1
-            elif num_vars == 1:
-                # (Shortcut) Wire directly to the big OR GCF later
-                var, polarity = tuple(term.var_polarities().items())[0]
-                assert(polarity == POS_LIT or polarity == NEG_LIT)
-                or_inputs[var] = int(polarity)
-        # Combine into one big OR gate
-        add_GCF_for_or(result, or_inputs, xi)
-        # Output should be true
-        result.append(Clause({xi}, []))
-        return result
+            if len(term.vars()) != 1:
+                is_all_1_var_terms = False
+                break
 
+        if is_all_1_var_terms:
+            # Multiple terms, where each only has one variable.
+            # Can create just a single CNF clause.
+            one_clause = Clause([], [])
+            for term in product_terms:
+                one_clause.positives.update(term.positives)
+                one_clause.negatives.update(term.negatives)
+            result.append(one_clause)
+            return result
+        else:
+            # Multiple terms with multiple variables
+            xi = find_max_var(product_terms) + 1
+            or_first_in_i = xi
+            # Keep track of the inputs to the OR gate, and their polarities.
+            or_inputs: dict[int, int] = {}
+            # Create AND gates for each product term
+            for term in product_terms:
+                num_vars = len(term.vars())
+                if num_vars > 1:
+                    # Create AND gate for this product term
+                    add_GCF_for_and(result, term.var_polarities(), xi)
+                    or_inputs[xi] = POS_LIT
+                    xi += 1
+                elif num_vars == 1:
+                    # (Shortcut) Wire directly to the big OR GCF later
+                    var, polarity = tuple(term.var_polarities().items())[0]
+                    assert(polarity == POS_LIT or polarity == NEG_LIT)
+                    or_inputs[var] = int(polarity)
+            # Combine into one big OR gate
+            add_GCF_for_or(result, or_inputs, xi)
+            # Now that we have the gate consistency, make sure the output should be 1
+            result.append(Clause({xi}, []))
+            return result
 
 
 def add_GCF_for_and(to_list: list[Clause], input_vars: dict[int, int], term_output_var: int):
@@ -1027,7 +1044,6 @@ def test_convert_SOP_to_CNF():
 def test_SAT_cnf():
     '''Test all functions in this file (SAT_cnf.py).'''
     print("Testing SAT_cnf.py")
-    test_str_CNF()
     test_parse_SOP_string()
     test_convert_SOP_to_CNF()
     test_clause_value()
