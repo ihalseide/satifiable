@@ -1066,11 +1066,11 @@ def read_DIMACS_file(file_path: str) -> list[Clause]:
     Read a file in DIMACS format and return all of the clauses (CNF).
     '''
     clauses = []
-    num_vars = 0
-    num_clauses = 0
+    num_vars, num_clauses = 0, 0
+    has_seen_p = False
     with open(file_path, "r") as file:
         # Read the file into a list of lines
-        for line in file:
+        for i, line in enumerate(file):
             if not line:
                 # Skip blank lines
                 continue
@@ -1079,18 +1079,27 @@ def read_DIMACS_file(file_path: str) -> list[Clause]:
                 continue
             elif line.startswith("p"):
                 # p cnf <vars> <clauses>
+                if has_seen_p:
+                    raise ValueError(f"multiple lines in DIMACS file \"{file_path}\" start with \"p\"")
+                has_seen_p = True
                 _, _, num_vars_s, num_clauses_s = line.split()
                 num_vars = int(num_vars_s)
+                if num_vars <= 0:
+                    raise ValueError(f"in DIMACS file \"{file_path}\" line {i+1}: number of variables must be greater than 0")
                 num_clauses = int(num_clauses_s)
+                if num_clauses <= 0:
+                    raise ValueError(f"in DIMACS file \"{file_path}\" line {i+1}: number of clauses must be greater than 0")
             else:
-                # Parse the clause
-                clause = parse_DIMACS_clause(line)
+                # Parse the clause line
+                if not has_seen_p:
+                    raise ValueError(f"in DIMACS file \"{file_path}\" line {i+1}: there is a clause line occuring before the problem statement line")
+                try:
+                    clause = parse_DIMACS_clause(line)
+                except ValueError as e:
+                    raise ValueError(f"in DIMACS file \"{file_path}\" line {i+1}: {e}")
                 clauses.append(clause)
-    assert(num_vars > 0)
-    assert(num_clauses == len(clauses))
-    # Print the clauses.
-    print('Converting to CNF, clauses are:')
-    print(CNF_to_string(clauses))
+    if num_clauses != len(clauses):
+        raise ValueError(f"in DIMACS file \"{file_path}\" the problem states there are {num_clauses} clauses, but {len(clauses)} were provided")
     return clauses
 
 
