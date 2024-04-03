@@ -449,7 +449,7 @@ def decide_variable(literal_set: set[int], decisions: dict[int, int]) -> int | N
         return None
     
 
-def unit_decisions(clauses: frozenset[Clause], var_set: set[int], current_assignments: dict[int, int]) -> dict[int, int]:
+def find_unit_assignments(clauses: frozenset[Clause], var_set: set[int], current_assignments: dict[int, int]) -> dict[int, int]:
     '''
     Return decided variable assignments to make using the unit clause trick.
     '''
@@ -457,16 +457,11 @@ def unit_decisions(clauses: frozenset[Clause], var_set: set[int], current_assign
     # Look for the variables of unit clauses
     for clause in clauses:
         undecided = var_set.intersection(clause.undecided_given(current_assignments))
-        #print(f"clause has undecided vars: {undecided}")
         if len(undecided) == 1:
             # Unit clause
             xi = next(iter(undecided))
-            polarity = clause.polarity_of(xi)
-            already = new_decisions.get(xi)
-            if already is not None and already != polarity:
-                # Conflict
-                pass
-            elif already is None:
+            if xi not in new_decisions and xi not in current_assignments:
+                polarity = clause.polarity_of(xi)
                 if polarity == POS_LIT:
                     new_decisions[xi] = 1
                 elif polarity == NEG_LIT:
@@ -541,7 +536,7 @@ def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, v
 
 
 # TODO: add unit propagation / other optimizations
-def dpll_iterative(original_clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int]|None=None) -> dict[int, int]:
+def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int]|None=None) -> dict[int, int]:
     '''
     The iterative function implementation for dpll().
     Arguments:
@@ -551,35 +546,60 @@ def dpll_iterative(original_clauses: list[Clause], assignments: dict[int, int] |
     Returns: the assignment (if any) for the set of variables that make F be SAT.
     '''
 
-    clauses = frozenset(original_clauses)
+    own_clauses = frozenset(clauses)
     #print("given clauses", CNF_to_string(clauses))
     ignored_clauses: set[Clause] = set()
 
-    if not clauses:
+    if not own_clauses:
         # Edge case where clauses is empty.
         # It's not possible to make any decisions/assignments, so return empty dictionary,
         # which is considered UNSAT.
+        print("No clauses")
         return {}
     
+    # All variables allowed to be changed
+    total_var_set = clauses_all_vars(clauses) 
+    
     # By default work with all variables that are present in the clauses.
-    var_set = clauses_all_vars(original_clauses) if var_set is None else var_set
+    var_set = total_var_set if var_set is None else var_set
     #print(f"var_set: {var_set}")
 
     # By default, assignments are empty (vars are all unassigned).
     # Otherwise, use the given assignments.
     assignments1: dict[int, int] = dict() if assignments is None else assignments
 
-    # Make first unit propagation decisions (can't be undone).
-    unit_assign = unit_decisions(clauses, var_set, assignments1)
-    assignments1.update(unit_assign)
+    # Make first unit propagation decisions (can't be undone later).
+    assignments1.update(find_unit_assignments(own_clauses, total_var_set, assignments1))
 
-    #print(f"initial assignments: {assignments1}")
+    # Pure literal elimination via assignment.
+    # Check each variable.
+    for var in total_var_set:
+        var_polarity: int | None = None
+        is_pure = True
+        # Check each clause if the variable appears in it with the same polarity.
+        for clause in own_clauses:
+            if clause.has_var(var):
+                clause_polarity = clause.polarity_of(var)
+                if var_polarity is None:
+                    # First clause with that var will determine the polarity to be matched
+                    if clause_polarity == POS_LIT:
+                        var_polarity = POS_LIT
+                    elif clause_polarity == NEG_LIT:
+                        var_polarity = NEG_LIT
+                else:
+                    # Other clauses should match the first polarity
+                    if (clause_polarity != 'BOTH') and (clause_polarity != var_polarity):
+                        is_pure = False
+                        break
+        if is_pure and var_polarity is not None:
+            # Can assign this pure literal
+            assignments1[var] = var_polarity
 
     # Make first decision.
-    starting_xi = decide_variable(var_set, assignments1)
+    starting_xi = decide_variable(total_var_set, assignments1)
     if starting_xi is None:
         # At this point, perhaps the unit assignment may or may not have made the function SAT.
-        for clause in clauses:
+        for clause in own_clauses:
             value = clause.value_given(assignments1)
             if value == UNSAT:
                 return {} # UNSAT
@@ -592,54 +612,42 @@ def dpll_iterative(original_clauses: list[Clause], assignments: dict[int, int] |
 
     # Initialize the stack
     stack: list[dict[int, int]] = [assignments1, assignments2]
+    print("stack initialized...", stack)
 
-    i = 0
     while stack:
-        if (i > 0) and (i % 100_000 == 0):
-            print(end='.', flush=True)
-            if i % 1_000_000 == 0:
-                print(end=str(i//1_000_000)+"M", flush=True)
-        i += 1
+        #print(f"\rstack size = {len(stack)}", end="", flush=True)
         current_assignments = stack.pop()
-        #print(f"(#{i}) try assignment = {current_assignments}")
 
-        #print("  unit decisions would be:", func_assignment_to_string(var_set, unit_decisions(clauses, var_set, current_assignments)))
+        assignments1 = current_assignments.copy()
 
-        undecided_clauses: set[Clause] = set()
-        an_UNSAT_clause: Clause|None = None
-        for clause in clauses:
-            value = clause.value_given(current_assignments)
+        # Unit propagation
+        while unit_assignments := find_unit_assignments(own_clauses, var_set, assignments1):
+            assignments1.update(unit_assignments)
+
+        has_undecided_clause = False
+        has_unsat_clause = False
+        for clause in own_clauses:
+            value = clause.value_given(assignments1)
             if value == UNSAT:
                 # If any clause is UNSAT, then the whole function is UNSAT.
-                an_UNSAT_clause = clause
-                break
+                has_unsat_clause = True
             elif value == UNDECIDED:
                 # Accumulate the undecided clauses for later.
-                undecided_clauses.add(clause)
+                has_undecided_clause = True
 
-        #print("  unSAT clause:", an_UNSAT_clause.str_CNF() if an_UNSAT_clause else "<NONE>")
-        #print("  undecided clauses :", CNF_to_string(undecided_clauses))
-
-        if an_UNSAT_clause is not None:
-            # This should be checked before anyUndecidedClause, because UNSAT takes precedence over UNDECIDED.
-            # If any clause is UNSAT, then the whole function is UNSAT for this branch.
-            # So, continue to next loop iteration to try the next branch(es) on the stack.
-            continue
-        elif not undecided_clauses:
+        if (not has_unsat_clause) and (not has_undecided_clause):
             # If no clauses are UNSAT and no clauses are undecided,
             # then all clauses are SAT and the whole function is SAT!
-            return current_assignments # SAT
+            #print("... SAT!")
+            return assignments1 # SAT
         else:
-            # At least one of the clauses is undecided,
+            # There is an UNSAT clause or at least one of the clauses is undecided,
             # So lets add two decisions to the stack to try next...
             xi = decide_variable(var_set, current_assignments)
-            if xi is None:
-                # There are no undecided literals, so we can't make any more decisions.
-                # This means that the function is UNSAT.
-                # NOTE: there are no new assignments to push, so this case is where the stack size will shrink.
-                continue # UNSAT
-            else:
+            if xi is not None:
+                # There are some undecided literals, so we can make more decisions...
                 # Add the assignment where, first, xi = randomly 0 or 1.
+                # Don't keep use the value of `assignments1` because those are based on more logic after the decision from `current_assignments`.
                 # (We don't need to make a copy of the `current_assignments` dictionary, because it is not used again after this loop iteration.)
                 value1, value2 = random_literal_pair()
                 current_assignments[xi] = value1
@@ -1164,15 +1172,6 @@ def _sat_result(cnf, variables):
         print("found SAT solution:", assignment_to_string(variables, sol))
     else:
         print("UNSAT")
-    # for f in (dpll_iterative, dpll_rec):
-    #     print(f">>>>>>>>>> solving using {f.__name__} ...")
-    #     solutions = find_all_SAT(cnf.copy(), f)
-    #     if solutions:
-    #         print("Function is SAT with these assignments:")
-    #     else:
-    #         print("Function is UNSAT")
-    #     for s in solutions:
-    #         print(func_assignment_to_string(variables, s))
     
 
 def main():
@@ -1180,7 +1179,7 @@ def main():
 
     # SOP string input
     print("============ Running function in SOP file... ============")
-    txt = "x1.~x2 + ~x1.x2"
+    txt = open("f1.sop").readline()
     sop = parse_DNF_string(txt)
     print("SOP:", DNF_to_string(sop))
     variables = clauses_all_vars(sop)
@@ -1190,7 +1189,7 @@ def main():
 
     # DIMACS input
     print("============ Running function in DIMACS file... ============")
-    cnf = read_DIMACS_file("xor.cnf")
+    cnf = read_DIMACS_file("f2.cnf")
     variables = clauses_all_vars(cnf)
     print("CNF:", CNF_to_string(cnf))
     _sat_result(cnf, variables)
