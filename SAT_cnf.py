@@ -28,7 +28,7 @@ UNDECIDED = 'UNDECIDED'
 class Clause(object):
     '''
     Clause class, which represents a clause in (CNF) Conjunctive Normal Form
-    (although it is sometimes used as a convenient container for SOP terms).
+    (although it is sometimes used as a convenient container for DNF terms).
 
     When this class is used in the SAT-search algorithms, a CNF clause goes to the inverted/negated boolean function ~F,
     which means that SAT will actually be looking for assignments that set all clauses to have a value of 0, which makes
@@ -130,7 +130,7 @@ class Clause(object):
         return Clause(self.negatives, self.positives, self.literals.copy())
     
 
-    def str_SOP(self) -> str:
+    def str_DNF(self) -> str:
         all = sorted(self.vars())
         string_literals = []
         for lit in self.literals:
@@ -218,9 +218,9 @@ class ClauseList:
     '''
     def __init__(self, sop_input: str):
         # Store SOP clauses in this member
-        self.sop_clauses = parse_SOP_string(sop_input)
+        self.sop_clauses = parse_DNF_string(sop_input)
         # Store CNF clauses in this member
-        self.cnf_clauses = convert_SOP_to_CNF(self.sop_clauses)
+        self.cnf_clauses = convert_DNF_to_CNF(self.sop_clauses)
         # Store the max variable from the SOP function input in this member
         self.input_max = find_max_var(self.sop_clauses)
 
@@ -258,15 +258,15 @@ def sat_val_negation(x:str) -> str:
     raise ValueError(f"x must be SAT or UNSAT but is \"{x}\"")
 
 
-def clauses_all_vars(clauses:list[Clause]) -> set[int]:
+def clauses_all_vars(clauses: list[Clause]) -> set[int]:
     '''Get the set of all variables in a given list of Clauses'''
-    result = set()
+    result: set[int] = set()
     for clause in clauses:
         result.update(clause.vars())
     return result
 
 
-def parse_SOP_string(text: str) -> list[Clause]: # list of product terms, not CNF clauses!
+def parse_DNF_string(text: str) -> list[Clause]: # list of product terms, not CNF clauses!
     '''
     Parses a Sum-of-Products boolean function string.
 
@@ -284,10 +284,10 @@ def parse_SOP_string(text: str) -> list[Clause]: # list of product terms, not CN
         negatives, multiple dots, extra letters, etc.
     '''
     if not text:
-        raise ValueError("empty SOP string")
+        raise ValueError("empty boolean function string")
     # Make sure only this subset of characters is in the input string
     if not re.match(r"^([ \r\n.~+x0-9])+$", text, flags=re.IGNORECASE):
-        raise ValueError("text string has forbidden characters for SOP form")
+        raise ValueError("text string has forbidden characters for DNF a.k.a SOP form")
     clauses: list[Clause] = [] 
     # split apart all of the product terms which are OR'ed together
     terms = text.split('+')
@@ -320,15 +320,14 @@ def parse_SOP_string(text: str) -> list[Clause]: # list of product terms, not CN
                 else:
                     positives.add(num)
             else:
-                raise ValueError(f"Invalid single literal in SOP term (dots are required): \"{lit}\"")
+                raise ValueError(f"Invalid single literal in DNF/SOP term (dots are required): \"{lit}\"")
         clauses.append( Clause(positives, negatives, term_lits) )
     return clauses
 
 
-def convert_SOP_to_CNF(product_terms: list[Clause]) -> list[Clause]:
+def convert_DNF_to_CNF(product_terms: list[Clause]) -> list[Clause]:
     '''
-    Convert a list of SOP clauses representing a boolean function, F,
-    (like from the result of parse_SOP_string) to a list of CNF clauses that represent F.
+    Convert a list of DNF clauses that represent a boolean function, F, into a list of CNF clauses that represent F.
     '''
     result: list[Clause] = []
     if len(product_terms) == 1:
@@ -353,11 +352,12 @@ def convert_SOP_to_CNF(product_terms: list[Clause]) -> list[Clause]:
         if is_all_1_var_terms:
             # Multiple terms, where each only has one variable.
             # Can create just a single CNF clause.
-            one_clause = Clause([], [])
+            one_positives: set[int] = set()
+            one_negatives: set[int] = set()
             for term in product_terms:
-                one_clause.positives.update(term.positives)
-                one_clause.negatives.update(term.negatives)
-            result.append(one_clause)
+                one_positives.update(term.positives)
+                one_negatives.update(term.negatives)
+            result.append(Clause(one_positives, one_negatives))
             return result
         else:
             # Multiple terms with multiple variables
@@ -413,16 +413,18 @@ def add_GCF_for_and(to_list: list[Clause], input_vars: dict[int, int], term_outp
 
     # Add a single CNF clause for the SUMATION part (invert original vars and introduce the output variable `z`):
     #    [SUM(over i=1 to n, of ~xi) + z]
-    summation_clause = Clause({term_output_var}, []) # add z
+    summation_positives: set[int] = set()
+    summation_negatives: set[int] = set()
+    summation_positives.add(term_output_var) # add z
     for x_i, polarity in input_vars.items():
         # Invert polarity of x_i
         if polarity == POS_LIT:
-            summation_clause.negatives.add(x_i)
+            summation_negatives.add(x_i)
         elif polarity == NEG_LIT:
-            summation_clause.positives.add(x_i)
+            summation_positives.add(x_i)
         else:
             raise ValueError(f"'and' input variable #{x_i} has invalid polarity: {polarity}")
-    to_list.append(summation_clause)
+    to_list.append(Clause(summation_positives, summation_negatives))
 
 
 def add_GCF_for_or(to_list: list[Clause], input_vars: dict[int, int], output_var: int):
@@ -449,16 +451,18 @@ def add_GCF_for_or(to_list: list[Clause], input_vars: dict[int, int], output_var
 
     # Add a single CNF clause for the SUMATION part:
     #    [SUM(over i=1 to n, of xi) + ~z]
-    summation_clause = Clause([], {output_var}) # add ~z
+    summation_positives: set[int] = set()
+    summation_negatives: set[int] = set()
+    summation_negatives.add(output_var) # add ~z
     for x_i, polarity in input_vars.items():
         # Keep polarity of x_i
         if polarity == POS_LIT:
-            summation_clause.positives.add(x_i)
+            summation_positives.add(x_i)
         elif polarity == NEG_LIT:
-            summation_clause.negatives.add(x_i)
+            summation_negatives.add(x_i)
         else:
             raise ValueError(f"'or' input variable #{x_i} has invalid polarity: {polarity}")
-    to_list.append(summation_clause)
+    to_list.append(Clause(summation_positives, summation_negatives))
 
 
 def find_max_var(clauses: list[Clause]) -> int:
@@ -470,89 +474,69 @@ def find_max_var(clauses: list[Clause]) -> int:
     return max([max(clause.vars()) for clause in clauses])
 
 
-def decide_literal(literal_set:set[int], decisions: dict) -> int|None:
+def decide_variable(literal_set: set[int], decisions: dict[int, int]) -> int | None:
     '''
     Choose an unassigned literal to try next.
     The `literal_set` is the set of literals allowed to be chosen from.
     Returns the index of the literal to try next, or `None` if there are no undecided literals.
     '''
-    assigned = set(decisions.keys())
-    unassigned = literal_set.difference(assigned)
+    unassigned = literal_set.difference(decisions.keys())
     if unassigned:
         return random.choice(tuple(unassigned))
     else:
         return None
-
-
-def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> dict[int, int|None]:
-    '''
-    Function for the unit propagation algorithm
-    - Unit propogation works by assigning a unit literal to make the clause SAT
-        - We then remove the clause from the search and then remove the unit literal's complement from the clauses.
-    - Function takes `list[Clause]` and `assignments dict()`
-    - Return the `assignments` of the clause after satisfying the unit clause
-    '''
     
-    # Loop over entire list of clauses
-    i = 0
-    polarity = 0
-    while i < len(clauses):
-        # If there is a unit clause in the list, assign 0 or 1 to the literal depending on the polarity
-        if clauses[i].isUnit == True:
-            for lit, val in assignments.items():
-                if (val == None) and (lit in clauses[i].vars()):
-                    if clauses[i].var_polarity(lit) == POS_LIT and assignments[lit] == None: 
-                        assignments[lit] = 1 # Only assigning the unassigned literal
-                        polarity = POS_LIT # Save the polarity of the literal to determine which complement to remove from the other clauses
-                    elif clauses[i].var_polarity(lit) == NEG_LIT and assignments[lit] == None:
-                        assignments[lit] = 0 # Only assigning the unassigned literal
-                        polarity =  NEG_LIT # Save the polarity of the literal to determine which complement to remove from the other clauses
-                    del clauses[i] # Remove the clause from the list now that it is SAT
-                    i -= 1
-                    # Loop over list again to remove the complement of the literal from all clauses
-                    for j in range(len(clauses)):
-                        # if the literal that just made the unit clause SAT is in this current clause and is ~xi
-                        if  (clauses[j].contains(lit)) and (polarity == NEG_LIT):
-                            for k, _ in clauses[j].var_polarities().items():
-                                # If literal is the complement of the literal that just made the unit clause SAT...
-                                if (k == lit) and (clauses[j].var_polarity(k) == POS_LIT):
-                                    clauses[j].remove_var(k) # Remove the complement literal
-                                    break # Removed complement. No need to iterate further in the clause
-                        # if the literal that just made the unit clause SAT is in this current clause and is xi
-                        elif (clauses[j].contains(lit)) and (polarity == POS_LIT):
-                            for k, _ in clauses[j].var_polarities().items():
-                                # If literal is the complement of the literal that just made the unit clause SAT...
-                                if (k == lit) and (clauses[j].var_polarity(k) == NEG_LIT):
-                                    clauses[j].remove_var(k) # Remove the complement literal
-                                    break # Removed complement. No need to iterate further in the clause
-                    # Removed clause. No need to further iterate
-                    break
-        i += 1
-    # Return the assignments
-    return assignments
+
+def unit_decisions(clauses: frozenset[Clause], var_set: set[int], current_assignments: dict[int, int]) -> dict[int, int]:
+    '''
+    Return decided variable assignments to make using the unit clause trick.
+    '''
+    new_decisions: dict[int, int] = {}
+    # Look for the variables of unit clauses
+    for clause in clauses:
+        undecided = var_set.intersection(clause.undecided_vars(current_assignments))
+        #print(f"clause has undecided vars: {undecided}")
+        if len(undecided) == 1:
+            # Unit clause
+            xi = next(iter(undecided))
+            polarity = clause.var_polarity(xi)
+            already = new_decisions.get(xi)
+            if already is not None and already != polarity:
+                # Conflict
+                pass
+            elif already is None:
+                if polarity == POS_LIT:
+                    new_decisions[xi] = 1
+                elif polarity == NEG_LIT:
+                    new_decisions[xi] = 0
+                else:
+                    raise ValueError(f"variable {xi} has unexpected polarity {polarity}")
+    return new_decisions
 
 
-# TODO: add unit propagation / other optimizations
 def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int] | None = None) -> dict[int, int]:
     '''
-    The recursive function implementation for dpll().
+    The recursive function implementation for dumb dpll(), which doesn't apply any optimization.
+    Used as a baseline to compare dpll_iter to.
     Arguments:
     - `clauses` = represent the CNF clauses for the boolean function, F.
     - `assignments` = current variable assignments (if any).
     - `var_set` = set of variables which may be included in an assignment to evaluate the boolean function.
     Returns: the assignment (if any) for the set of variables that make F be SAT.
     '''
+    #print(f"dpll_rec(..., {assignments})")
     # By default, assignments are empty (vars are all unassigned).
     assignments = dict() if assignments is None else assignments
     # By default work with all variables that are present in the clauses.
     var_set = clauses_all_vars(clauses) if var_set is None else var_set
+
     # Base cases:
     # - if all clauses are SAT, then then the function is SAT.
     # - if any clause is UNSAT, then the function is UNSAT.
     # - if there are no clauses, then the function is SAT.
     if not clauses:
         return assignments # SAT
-    # Call unit_propagate() to SAT any unit clauses
+    
     anyUndecidedClause: bool = False
     for clause in clauses:
         value = clause.value_cnf(assignments)
@@ -562,21 +546,19 @@ def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, v
         elif value == UNDECIDED:
             # We only need to see that one clause is undecided to know if any are undecided.
             anyUndecidedClause = True
-            #if clause.isUnit == True:
-            #    assignments = unit_propagate(clauses, assignments)
+
     if anyUndecidedClause:
         # At least one of the clauses is undecided.
         # Choose a literal to try to assign to 1 or to 0...
         # And try those options out by branching recursively.
-        xi = decide_literal(var_set, assignments)
+        xi = decide_variable(var_set, assignments)
         if xi is None:
             # There are no undecided literals, so we can't make any more decisions.
             # This means that the function is UNSAT with previous assignments.
             return {}
         else:
             # Try both possibilities of assigning xi (choose the order randomly)
-            value1: int = random.choice((0, 1))
-            value2: int = 1 - value1 # inverts value1
+            value1, value2 = random_literal_pair()
             assignments[xi] = value1
             if (result := dpll_rec(clauses, assignments)):
                 # SAT
@@ -597,7 +579,7 @@ def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, v
 
 
 # TODO: add unit propagation / other optimizations
-def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int]|None=None) -> dict[int, int]:
+def dpll_iterative(original_clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int]|None=None) -> dict[int, int]:
     '''
     The iterative function implementation for dpll().
     Arguments:
@@ -606,10 +588,10 @@ def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = N
     - `var_set` = set of variables which may be included in an assignment to evaluate the boolean function.
     Returns: the assignment (if any) for the set of variables that make F be SAT.
     '''
-    # global for saving the original list of clauses derived
-    #global original_clauses
-    # Make a copy of the clauses to use to evaluate the clauses
-    #original_clauses = deepcopy(clauses)
+
+    clauses = frozenset(original_clauses)
+    #print("given clauses", CNF_to_string(clauses))
+    ignored_clauses: set[Clause] = set()
 
     if not clauses:
         # Edge case where clauses is empty.
@@ -618,50 +600,77 @@ def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = N
         return {}
     
     # By default work with all variables that are present in the clauses.
-    var_set = clauses_all_vars(clauses) if var_set is None else var_set
+    var_set = clauses_all_vars(original_clauses) if var_set is None else var_set
+    #print(f"var_set: {var_set}")
 
     # By default, assignments are empty (vars are all unassigned).
+    # Otherwise, use the given assignments.
     assignments1: dict[int, int] = dict() if assignments is None else assignments
+
+    # Make first unit propagation decisions (can't be undone).
+    unit_assign = unit_decisions(clauses, var_set, assignments1)
+    assignments1.update(unit_assign)
+
+    #print(f"initial assignments: {assignments1}")
+
+    # Make first decision.
+    starting_xi = decide_variable(var_set, assignments1)
+    if starting_xi is None:
+        # At this point, perhaps the unit assignment may or may not have made the function SAT.
+        for clause in clauses:
+            value = clause.value_cnf(assignments1)
+            if value == UNSAT:
+                return {} # UNSAT
+            elif value == UNDECIDED:
+                return {} # UNSAT
+        return assignments1 # SAT
+    
     assignments2: dict[int,int] = assignments1.copy()
+    assignments1[starting_xi], assignments2[starting_xi] = random_literal_pair()
 
-    # Start the stack of assigments to try
-    starting_xi = decide_literal(var_set, assignments1)
-    assert(starting_xi)
-    assignments1[starting_xi] = 1
-    assignments2[starting_xi] = 0
-    stack = []
-    stack.append(assignments1)
-    stack.append(assignments2)
+    # Initialize the stack
+    stack: list[dict[int, int]] = [assignments1, assignments2]
 
+    i = 0
     while stack:
+        if (i > 0) and (i % 100_000 == 0):
+            print(end='.', flush=True)
+            if i % 1_000_000 == 0:
+                print(end=str(i//1_000_000)+"M", flush=True)
+        i += 1
         current_assignments = stack.pop()
-        anyUndecidedClause: bool = False
-        anUNSATClause: Clause|None = None
+        #print(f"(#{i}) try assignment = {current_assignments}")
+
+        #print("  unit decisions would be:", func_assignment_to_string(var_set, unit_decisions(clauses, var_set, current_assignments)))
+
+        undecided_clauses: set[Clause] = set()
+        an_UNSAT_clause: Clause|None = None
         for clause in clauses:
             value = clause.value_cnf(current_assignments)
             if value == UNSAT:
                 # If any clause is UNSAT, then the whole function is UNSAT.
-                anUNSATClause = clause
+                an_UNSAT_clause = clause
                 break
-            elif (not anyUndecidedClause) and (value == UNDECIDED):
-                # We only need to see that one clause is undecided to know if any are undecided.
-                anyUndecidedClause = True
-                #current_assignments = unit_propagate(clauses, current_assignments)
+            elif value == UNDECIDED:
+                # Accumulate the undecided clauses for later.
+                undecided_clauses.add(clause)
 
-        # This should be checked before anyUndecidedClause, because UNSAT takes precedence over UNDECIDED.
-        if anUNSATClause is not None:
+        #print("  unSAT clause:", an_UNSAT_clause.str_CNF() if an_UNSAT_clause else "<NONE>")
+        #print("  undecided clauses :", CNF_to_string(undecided_clauses))
+
+        if an_UNSAT_clause is not None:
+            # This should be checked before anyUndecidedClause, because UNSAT takes precedence over UNDECIDED.
             # If any clause is UNSAT, then the whole function is UNSAT for this branch.
-            # So, continue to next loop iteration to try the next branch(es).
+            # So, continue to next loop iteration to try the next branch(es) on the stack.
             continue
-
-        if not anyUndecidedClause:
+        elif not undecided_clauses:
             # If no clauses are UNSAT and no clauses are undecided,
             # then all clauses are SAT and the whole function is SAT!
             return current_assignments # SAT
         else:
             # At least one of the clauses is undecided,
             # So lets add two decisions to the stack to try next...
-            xi = decide_literal(var_set, current_assignments)
+            xi = decide_variable(var_set, current_assignments)
             if xi is None:
                 # There are no undecided literals, so we can't make any more decisions.
                 # This means that the function is UNSAT.
@@ -670,8 +679,7 @@ def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = N
             else:
                 # Add the assignment where, first, xi = randomly 0 or 1.
                 # (We don't need to make a copy of the `current_assignments` dictionary, because it is not used again after this loop iteration.)
-                value1 = random.choice((0, 1))
-                value2 = 1 - value1 # inverts value1
+                value1, value2 = random_literal_pair()
                 current_assignments[xi] = value1
                 stack.append(current_assignments)
                 # Then add the assignment where xi = the opposite of the first choice.
@@ -680,8 +688,17 @@ def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = N
                 assignments2[xi] = value2
                 stack.append(assignments2)
 
+    # Empty stack.
     # UNSAT due to no more possible assignments on the stack.
     return {} # UNSAT
+
+
+def random_literal_pair() -> tuple[int, int]:
+    '''
+    Get a randomly ordered pair of 0 and 1.
+    Returns either (0, 1) or (1, 0).
+    '''
+    return random.choice(((0, 1), (1, 0)))
 
 
 def make_blocking_clause(assignments: dict[int,Any]) -> Clause:
@@ -694,13 +711,13 @@ def make_blocking_clause(assignments: dict[int,Any]) -> Clause:
     return Clause(pos, neg)
 
 
-def find_all_SAT(clauses: list[Clause]) -> list[dict[int, int]]:
+def find_all_SAT(clauses: list[Clause], solver_func=dpll_rec) -> list[dict[int, int]]:
     '''
     Find all satisfying assignments for a boolean function in CNF.
     '''
     solutions: list[dict[int, int]] = []
     # Use the DPLL algorithm to find all solutions
-    while (solution := dpll_iterative(clauses)):
+    while (solution := solver_func(clauses)):
         # Add the current solution to the list of solutions
         solutions.append(solution)
         # Add a new clause to the CNF that blocks the current solution
@@ -915,10 +932,10 @@ def test_dpll(dpll_func):
            or (result.get(1) == 0 and result.get(2) == 0))
 
 
-def test_parse_SOP_string():
+def test_parse_DNF_string():
     print('Testing parse_SOP_string()')
     
-    a = parse_SOP_string("1")
+    a = parse_DNF_string("1")
     assert(len(a) == 1)
     c = a[0]
     assert(1 in c.literals)
@@ -926,7 +943,7 @@ def test_parse_SOP_string():
     assert(not c.positives)
     assert(not c.negatives)
 
-    a = parse_SOP_string("0")
+    a = parse_DNF_string("0")
     assert(len(a) == 1)
     c = a[0]
     assert(1 not in c.literals)
@@ -934,7 +951,7 @@ def test_parse_SOP_string():
     assert(not c.positives)
     assert(not c.negatives)
 
-    a = parse_SOP_string("1 . 1")
+    a = parse_DNF_string("1 . 1")
     assert(len(a) == 1)
     c = a[0]
     assert(1 in c.literals)
@@ -942,7 +959,7 @@ def test_parse_SOP_string():
     assert(not c.positives)
     assert(not c.negatives)
 
-    a = parse_SOP_string("1 . 0")
+    a = parse_DNF_string("1 . 0")
     assert(len(a) == 1)
     c = a[0]
     assert(1 in c.literals)
@@ -950,7 +967,7 @@ def test_parse_SOP_string():
     assert(not c.positives)
     assert(not c.negatives)
 
-    a = parse_SOP_string("1 + 0")
+    a = parse_DNF_string("1 + 0")
     assert(len(a) == 2)
     c = a[0]
     assert(1 in c.literals)
@@ -963,14 +980,14 @@ def test_parse_SOP_string():
     assert(not c.positives)
     assert(not c.negatives)
 
-    a = parse_SOP_string("x1")
+    a = parse_DNF_string("x1")
     assert(len(a) == 1)
     c = a[0]
     assert(1 in c.positives)
     assert(not c.literals)
     assert(not c.negatives)
 
-    a = parse_SOP_string("x1 + x2 + x3")
+    a = parse_DNF_string("x1 + x2 + x3")
     assert(len(a) == 3)
     assert(1 in a[0].positives)
     assert(2 in a[1].positives)
@@ -979,53 +996,53 @@ def test_parse_SOP_string():
     assert(2 not in a[1].negatives)
     assert(3 not in a[2].negatives)
 
-    a = parse_SOP_string("x1 . ~x2")
+    a = parse_DNF_string("x1 . ~x2")
     assert(len(a) == 1)
     assert(1 in a[0].positives)
     assert(2 not in a[0].positives)
     assert(1 not in a[0].negatives)
     assert(2 in a[0].negatives)
 
-    a = parse_SOP_string("~x1 . x2")
+    a = parse_DNF_string("~x1 . x2")
     assert(len(a) == 1)
     assert(1 not in a[0].positives)
     assert(2 in a[0].positives)
     assert(1 in a[0].negatives)
     assert(2 not in a[0].negatives)
 
-    a = parse_SOP_string("~x1 . ~x2")
+    a = parse_DNF_string("~x1 . ~x2")
     assert(len(a) == 1)
     assert(1 not in a[0].positives)
     assert(2 not in a[0].positives)
     assert(1 in a[0].negatives)
     assert(2 in a[0].negatives)
 
-    a = parse_SOP_string("~x1 . x1 . x1")
+    a = parse_DNF_string("~x1 . x1 . x1")
     assert(len(a) == 1)
     assert(1 in a[0].negatives)
     assert(1 in a[0].positives)
 
 
-def test_convert_SOP_to_CNF():
-    print('Testing convert_SOP_to_CNF()')
+def test_convert_DNF_to_CNF():
+    print('Testing convert_DNF_to_CNF()')
     
     # try single-variable SOP clauses of "x1" up to "x100"
     for xi in range(1, 100):
         # positive clauses
         sop = [ Clause([xi], []) ] # "xi"
-        cnf = convert_SOP_to_CNF(sop) # "(xi)"
+        cnf = convert_DNF_to_CNF(sop) # "(xi)"
         assert(cnf[0].vars() == {xi})
         assert(cnf[0].var_polarity(xi) == POS_LIT)
 
         # negative clauses
         sop = [ Clause([], [xi]) ] # "~xi"
-        cnf = convert_SOP_to_CNF(sop) # "(~xi)"
+        cnf = convert_DNF_to_CNF(sop) # "(~xi)"
         assert(cnf[0].vars() == {xi})
         assert(cnf[0].var_polarity(xi) == NEG_LIT)
 
     # try a single SOP clause with 2 variables
     sop = [ Clause([1, 2], []) ] # "x1 . x2"
-    cnf = convert_SOP_to_CNF(sop) # should be "(x1)(x2)"
+    cnf = convert_DNF_to_CNF(sop) # should be "(x1)(x2)"
     assert(len(cnf) == 2)
     assert(cnf[0].vars() == {1})
     assert(cnf[0].var_polarity(1) == POS_LIT)
@@ -1034,7 +1051,7 @@ def test_convert_SOP_to_CNF():
 
     # try a single SOP clause with 2 variables
     sop = [ Clause([1], [2]) ] # "x1 . ~x2"
-    cnf = convert_SOP_to_CNF(sop) # should be "(x1)(~x2)"
+    cnf = convert_DNF_to_CNF(sop) # should be "(x1)(~x2)"
     assert(len(cnf) == 2)
     assert(cnf[0].vars() == {1})
     assert(cnf[0].var_polarity(1) == POS_LIT)
@@ -1044,7 +1061,7 @@ def test_convert_SOP_to_CNF():
     error = False
     try:
         sop = [ Clause([99], [99]) ] # "xi . ~xi"
-        cnf = convert_SOP_to_CNF(sop) # should be "(xi . ~x1)""
+        cnf = convert_DNF_to_CNF(sop) # should be "(xi . ~x1)""
         assert(cnf[0].vars() == {99})
         assert(cnf[0].var_polarity(99) == 'BOTH')
     except ValueError:
@@ -1055,8 +1072,8 @@ def test_convert_SOP_to_CNF():
 def test_SAT_cnf():
     '''Test all functions in this file (SAT_cnf.py).'''
     print("Testing SAT_cnf.py")
-    test_parse_SOP_string()
-    test_convert_SOP_to_CNF()
+    test_parse_DNF_string()
+    test_convert_DNF_to_CNF()
     test_clause_value()
     test_dpll(dpll_rec)
     test_dpll(dpll_iterative)
@@ -1138,7 +1155,7 @@ def read_DIMACS_file(file_path: str) -> list[Clause]:
     return clauses
 
 
-def read_sop_file(file_path: str) -> tuple[list[Clause], set[int]]:
+def read_DNF_file(file_path: str) -> tuple[list[Clause], set[int]]:
     '''
     Function to read the plain text SoP function.
     Will read the first function on line 1.
@@ -1154,18 +1171,18 @@ def read_sop_file(file_path: str) -> tuple[list[Clause], set[int]]:
         function = file.readline()
         print('Parsing SOP input:', function)
         # Parse the string input
-        sop = parse_SOP_string(function)
+        sop = parse_DNF_string(function)
         original_vars = clauses_all_vars(sop)
-        print('Parsed result:', SOP_to_string(sop))
+        print('Parsed result:', DNF_to_string(sop))
         # Convert the string to CNF form
-        cnf = convert_SOP_to_CNF(sop)
+        cnf = convert_DNF_to_CNF(sop)
         # Print the CNF clause list
         print('Converting to CNF, clauses are:')
         print(CNF_to_string(cnf)) # print clause list
         return cnf, original_vars
 
 
-def read_sop_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
+def read_DNF_file_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
     '''
     Function to read the plain text SoP functions. Should only be used for XOR operation
     Requires two functions in the plain text file. They will be XOR'd together
@@ -1184,12 +1201,12 @@ def read_sop_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
         function2 = file.readlines()[0]
         print('Parsing SOP input:', function1)
         # Parse the string input
-        sop1 = parse_SOP_string(function1)
-        print('Parsed result:', '+'.join([x.str_SOP() for x in sop1]))
+        sop1 = parse_DNF_string(function1)
+        print('Parsed result:', '+'.join([x.str_DNF() for x in sop1]))
         print('Parsing SOP input:', function2)
         # Parse the string input
-        sop2 = parse_SOP_string(function2)
-        print('Parsed result:', '+'.join([x.str_SOP() for x in sop2]))
+        sop2 = parse_DNF_string(function2)
+        print('Parsed result:', '+'.join([x.str_DNF() for x in sop2]))
         # Create a ClauseList object to convert the SoP function to CNF.
         # Object members contain CNF form function and other attributes
         cnf1 = ClauseList(function1)
@@ -1202,17 +1219,26 @@ def read_sop_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
     return cnf1, cnf2
 
 
-def SOP_to_string(sop_clauses: list[Clause]) -> str:
-    sorted_clauses = sorted(sop_clauses, key=lambda c: len(c.vars()))
-    return " + ".join([f"({c.str_SOP()})" for c in sorted_clauses])
+def DNF_to_string(dnf_clauses: Iterable[Clause]) -> str:
+    '''
+    Turn a list of SOP clauses into a nice readable string.
+    '''
+    sorted_clauses = sorted(dnf_clauses, key=lambda c: len(c.vars()))
+    return " + ".join([f"({c.str_DNF()})" for c in sorted_clauses])
 
 
-def CNF_to_string(cnf_clauses: list[Clause]) -> str:
+def CNF_to_string(cnf_clauses: Iterable[Clause]) -> str:
+    '''
+    Turn a list of CNF clauses into a nice readable string.
+    '''
     sorted_clauses = sorted(cnf_clauses, key=lambda c: len(c.vars()))
     return ".".join([f"({c.str_CNF()})" for c in sorted_clauses])
 
 
 def func_assignment_to_string(var_set: set[int], assignments: dict[int, int]) -> str:
+    '''
+    Turn a dictionary of variable assignments into a nice readable string.
+    '''
     vals = []
     for xi, v in sorted(assignments.items()):
         if xi in var_set:
@@ -1220,36 +1246,44 @@ def func_assignment_to_string(var_set: set[int], assignments: dict[int, int]) ->
     return ", ".join(vals)
 
 
-def main():
-    is_sop_input = False
-    if is_sop_input:
-        # SOP string input
-        txt = "x1.~x3.~x4 + x2.~x1.x5 + x1.~x5.~x3.~x4"
-        sop = parse_SOP_string(txt)
-        print("SOP:", SOP_to_string(sop))
-        variables = clauses_all_vars(sop)
-        cnf = convert_SOP_to_CNF(sop)
-        print("CNF:", CNF_to_string(cnf))
-        solutions = find_all_SAT(cnf)
-        if solutions:
-            print("Function is SAT with these assignments:")
-        else:
-            print("Function is UNSAT")
-        for sol in solutions:
-            print(func_assignment_to_string(variables, sol))
+def _sat_result(cnf, variables):
+    print("Running SAT...")
+    sol = dpll_iterative(cnf)
+    if sol:
+        print("found SAT solution:", func_assignment_to_string(variables, sol))
     else:
-        # DIMACS input
-        cnf = read_DIMACS_file("xor.cnf")
-        variables = clauses_all_vars(cnf)
-        print("CNF:", CNF_to_string(cnf))
-        solutions = find_all_SAT(cnf)
-        if solutions:
-            print("Function is SAT with these assignments:")
-        else:
-            print("Function is UNSAT")
-        for sol in solutions:
-            print(func_assignment_to_string(variables, sol))
+        print("UNSAT")
+    # for f in (dpll_iterative, dpll_rec):
+    #     print(f">>>>>>>>>> solving using {f.__name__} ...")
+    #     solutions = find_all_SAT(cnf.copy(), f)
+    #     if solutions:
+    #         print("Function is SAT with these assignments:")
+    #     else:
+    #         print("Function is UNSAT")
+    #     for s in solutions:
+    #         print(func_assignment_to_string(variables, s))
+    
+
+def main():
+    test_SAT_cnf()
+
+    # SOP string input
+    print("============ Running function in SOP file... ============")
+    txt = "x1.~x2 + ~x1.x2"
+    sop = parse_DNF_string(txt)
+    print("SOP:", DNF_to_string(sop))
+    variables = clauses_all_vars(sop)
+    cnf = convert_DNF_to_CNF(sop)
+    print("CNF:", CNF_to_string(cnf))
+    _sat_result(cnf, variables)
+
+    # DIMACS input
+    print("============ Running function in DIMACS file... ============")
+    cnf = read_DIMACS_file("xor.cnf")
+    variables = clauses_all_vars(cnf)
+    print("CNF:", CNF_to_string(cnf))
+    _sat_result(cnf, variables)
+
 
 if __name__ == "__main__":
-    #test_SAT_cnf()
     main()
