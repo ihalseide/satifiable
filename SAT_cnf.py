@@ -765,26 +765,6 @@ def xor_CNF_functions(clauses_a: Iterable[Clause], clauses_b: Iterable[Clause]) 
     return clauses_result
 
 
-def boolean_functions_are_equivalent(clauses1: ClauseList, clauses2: ClauseList, find_all: bool) -> (list[dict[int, None]] | dict[int, Any]):
-    '''
-    Function to determine if two sets of CNF clauses represent the same boolean function by using SAT solving.
-    Does this by XOR'ing the two sets of clauses and checking if the result is UNSAT.
-    '''
-    # XOR the two sets of clauses together,
-    # Using gate consistency functions for AND and OR to implement (a^b) as (~a.b + a.~b).
-    clauses: list[Clause] = xor_CNF_functions(clauses1, clauses2)
-
-    # Print the list of clauses from XOR operation
-    print(f"CNF clause from XOR functions: {clauses}")
-    result = None
-    # Find all or one solution(s) for SAT
-    if find_all:
-        result = find_all_SAT(clauses)
-    else:
-        result = dpll_iterative(clauses)
-    return result
-
-
 def test_clause_value():
     '''
     Test the Clause.value_cnf() function
