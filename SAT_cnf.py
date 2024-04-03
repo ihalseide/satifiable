@@ -16,21 +16,6 @@ UNSAT = 'UNSAT'
 UNDECIDED = 'UNDECIDED'
 
 
-parser = argparse.ArgumentParser(description='Provide path to file with boolean function to check for SAT or UNSAT.\nFile must contain at least one function and no more than two.\nFunctions MUST be in SoP form.\nIf two functions are in file, pass in [-x, --xor] flag to find SAT on two functions.')
-mutual1 = parser.add_mutually_exclusive_group(required=False)
-mutual2 = parser.add_mutually_exclusive_group(required=False)
-group1 = parser.add_argument_group()
-group2 = parser.add_argument_group()
-group1.add_argument('-f', '--file', required=False, type=str, help='SoP file to parse function in SoP form')
-group1.add_argument('-x', '--xor', required=False, help='XOR two SoP functions and return SAT or UNSAT', action='store_true')
-mutual1.add_argument('-a', '--all-sop', required=False, help="Find all solutions for function in SoP form", action='store_true')
-mutual1.add_argument('-o', '--one-sop', required=False, help="Find one solution for function in SoP form", action='store_true')
-group1.add_argument('-p', '--print', required=False, help="Print the DIMACS form of a SoP function from a file. Only use with [-f, --file] option", action='store_true')
-group2.add_argument('-d', '--dimacs', required=False, type=str, help="DIMACS file to parse instead of a function in SoP form")
-mutual2.add_argument('-m', '--all-dimacs', required=False, help="Find all solutions for function in DIMACS form", action='store_true')
-mutual2.add_argument('-s', '--one-dimacs', required=False, help="Find one solution for function in DIMACS form", action='store_true')
-
-
 class Clause:
     '''
     Clause class, which represents a clause in (CNF) Conjunctive Normal Form.
@@ -757,9 +742,6 @@ def boolean_functions_are_equivalent(clauses1: ClauseList, clauses2: ClauseList,
     return result
 
 
-def printAssignments(assignments: dict[int,Any]):
-    print(", ".join([f"x{i}={v}" for i, v in assignments.items()]))
-
 def test_clause_value():
     '''
     Test the Clause.value_cnf() function
@@ -1123,11 +1105,11 @@ def read_DIMACS_file(file_path: str) -> list[Clause]:
     assert(num_clauses == len(clauses))
     # Print the clauses.
     print('Converting to CNF, clauses are:')
-    print(".".join([str(clauses[i]) for i in range(len(clauses))]))
+    print(CNF_to_string(clauses))
     return clauses
 
 
-def read_sop_file(file_path: str) -> list[Clause]:
+def read_sop_file(file_path: str) -> tuple[list[Clause], set[int]]:
     '''
     Function to read the plain text SoP function.
     Will read the first function on line 1.
@@ -1144,13 +1126,14 @@ def read_sop_file(file_path: str) -> list[Clause]:
         print('Parsing SOP input:', function)
         # Parse the string input
         sop = parse_SOP_string(function)
-        print('Parsed result:', '+'.join([x.str_SOP() for x in sop]))
+        original_vars = clauses_all_vars(sop)
+        print('Parsed result:', SOP_to_string(sop))
         # Convert the string to CNF form
         cnf = convert_SOP_to_CNF(sop)
         # Print the CNF clause list
         print('Converting to CNF, clauses are:')
-        print(".".join([str(c) for c in cnf])) # print clause list
-    return cnf
+        print(CNF_to_string(cnf)) # print clause list
+        return cnf, original_vars
 
 
 def read_sop_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
@@ -1194,26 +1177,9 @@ def parenthesize(t: str) -> str:
     return f"({t})"
 
 
-def print_result(result: list[dict[int, int]], all_sat: bool):
-    '''
-    Function to print the result SAT or UNSAT.
-    '''
-    # If bool for finding all SAT solutions is false, then only print one solution
-    if not all_sat:
-        if result:
-            print("Function is SAT with this assignment:")
-            printAssignments(result)
-        else:
-            print("Function is UNSAT")
-    # Print all given solutions
-    else:
-        if result:
-            print("Function is SAT with these assignments:")
-            for i, r in enumerate(result):
-                print(end=f'- solution #{i+1}: ')
-                printAssignments(r)
-        else:
-            print("Function is UNSAT")
+def SOP_to_string(sop_clauses: list[Clause]) -> str:
+    sorted_clauses = sorted(sop_clauses, key=lambda c: len(c.vars()))
+    return " + ".join([parenthesize(c.str_SOP()) for c in sorted_clauses])
 
 
 def CNF_to_string(cnf_clauses: list[Clause]) -> str:
@@ -1230,86 +1196,27 @@ def func_assignment_to_string(var_set: set[int], assignments: dict[int, int]) ->
 
 
 def main():
-    args = parser.parse_args()
-
-    if len(argv) == 1:
-        parser.print_help(stderr)
-        exit(1)
-        
-    if not args.file and not args.dimacs:
-        # Run tests if no files were provided
-        print('No file provided, Running tests...')
-        test_SAT_cnf()
-        return
-
-        # If DIMACS formatted file was provided...
-    if args.dimacs:
-        # Find one solution for the given clauses
-        if args.one_dimacs:# Find one SAT solution from DIMACS format
-            # Parse DIMACS and call DPLL algorithm to find SAT or UNSAT
-            print('Parsing DIMACS file at:', args.dimacs)
-            clauses = read_DIMACS_file(args.dimacs)
-            result = dpll_iterative(clauses)
-        # Find all solutions for the given clauses
-        elif args.all_dimacs:
-            # Parse DIMACS and call DPLL algorithm to find SAT or UNSAT
-            print('Parsing DIMACS file at:', args.dimacs)
-            clauses = read_DIMACS_file(args.dimacs)
-            result = find_all_SAT(clauses)
-        else:
-            parser.print_help(stderr)
-            exit(1)
-        # Print all or one solution(s) from the result
-        print_result(result, args.all_dimacs)
-        return
-    
-    # If SoP formatted file was provided...
-    if args.file and not args.xor and not args.print:
-        # Find one SAT solution from given file for one function
-        if args.one_sop:
-            # Parse SoP and call DPLL algorithm to find SAT or UNSAT
-            cnf = read_sop_file(args.file)
-            result = dpll_iterative(cnf)
-        # Find all SAT solutions from given file for one function
-        elif args.all_sop:
-            # Parse SoP and call DPLL algorithm to find SAT or UNSAT
-            cnf = read_sop_file(args.file)
-            result = find_all_SAT(cnf)
-        else:
-            parser.print_help(stderr)
-            exit(1)
-    # Print all or one solution(s) from the result
-        print_result(result, args.all_sop)
-        return
-
-    # Find if two solutions are SAT by XOR
-    if args.file and args.xor and not args.print:
-        # Read both lines of file and return the CNF Clauses
-        cnf1, cnf2 = read_sop_xor(args.file)
-        # args.all_sop holds boolean if we want all or one result. 
-        # Depending on that, we call either find_and_print_all_SAT() or dpll_iterative()
-        result = boolean_functions_are_equivalent(cnf1, cnf2, args.all_sop)
-        # Print all or one solution(s) from the result
-        print_result(result, args.all_sop)
-        return
-
-    # Print the DIMACS format of a given SoP function
-    if args.file and args.print:
-        cnf = read_sop_file(args.file)
-        print('--- BEGIN DIMACS FORMAT')
-        print_clauses_as_DIMACS(cnf)
-        print('--- END DIMACS FORMAT')
-        return
+    is_sop_input = False
+    if is_sop_input:
+        # SOP string
+        txt = "x1.~x3.~x4 + x2.~x1.x5 + x1.~x5.~x3.~x4"
+        sop = parse_SOP_string(txt)
+        print("SOP:", SOP_to_string(sop))
+        variables = clauses_all_vars(sop)
+        cnf = convert_SOP_to_CNF(sop)
+        print("CNF:", CNF_to_string(cnf))
+        solutions = find_all_SAT(cnf)
+        for sol in solutions:
+            print(func_assignment_to_string(variables, sol))
+    else:
+        # DIMACS input
+        cnf = read_DIMACS_file("xor.cnf")
+        variables = clauses_all_vars(cnf)
+        print("CNF:", CNF_to_string(cnf))
+        solutions = find_all_SAT(cnf)
+        for sol in solutions:
+            print(func_assignment_to_string(variables, sol))
 
 if __name__ == "__main__":
-    txt = "x1.x4 + x2.x3 + x5.x2.x4"
-    print(txt)
-    sop = parse_SOP_string(txt)
-    print(" + ".join([x.str_SOP() for x in sop]))
-    var_set = clauses_all_vars(sop)
-    cnf = convert_SOP_to_CNF(sop)
-    print(CNF_to_string(cnf))
-    result = dpll_iterative(cnf)
-    print(func_assignment_to_string(var_set, result))
     #test_SAT_cnf()
-    #main()
+    main()
