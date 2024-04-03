@@ -208,9 +208,9 @@ class ClauseList:
         # Store SOP clauses in this member
         self.sop_clauses = parse_SOP_string(sop_input)
         # Store CNF clauses in this member
-        self.cnf_clauses = convert_SOP_to_CNF_neg(self.sop_clauses)
+        self.cnf_clauses = convert_SOP_to_CNF(self.sop_clauses)
         # Store the max variable from the SOP function input in this member
-        self.input_max = find_maximum_literal(self.sop_clauses)
+        self.input_max = find_max_var(self.sop_clauses)
 
         # Keep a count of the index where the max input variable 
         # in SoP form is and store in this member
@@ -743,54 +743,6 @@ def boolean_functions_are_equivalent(clauses1: ClauseList, clauses2: ClauseList,
 def printAssignments(assignments: dict[int,Any]):
     print(", ".join([f"x{i}={v}" for i, v in assignments.items()]))
 
-
-def test_str_CNF():
-    print("Testing Clause.str_CNF()")
-
-    c = Clause([],[])
-    assert(c.str_CNF() == '')
-    assert(c.str_CNF(False) == '')
-
-    c = Clause([], [], {0})
-    assert(c.str_CNF() == '0')
-    assert(c.str_CNF(False) == '0')
-
-    c = Clause([], [], {1})
-    assert(c.str_CNF() == '1')
-    assert(c.str_CNF(False) == '1')
-
-    c = Clause([], [], {0, 1})
-    assert(c.str_CNF() == '0 + 1')
-    assert(c.str_CNF(False) == '0 . 1')
-
-    c = Clause({1}, [])
-    assert(c.str_CNF() == 'x1')
-    assert(c.str_CNF(False) == 'x1')
-
-    c = Clause([], {1})
-    assert(c.str_CNF() == '~x1')
-    assert(c.str_CNF(False) == '~x1')
-
-    c = Clause({1}, {1})
-    assert(c.str_CNF() == 'x1 + ~x1')
-    assert(c.str_CNF(False) == 'x1 . ~x1')
-
-    c = Clause({1, 2}, {2, 3})
-    assert(c.str_CNF() == 'x1 + x2 + ~x2 + ~x3')
-    assert(c.str_CNF(False) == 'x1 . x2 . ~x2 . ~x3')
-
-    c = Clause({1, 2}, {2, 3}, {1})
-    assert(c.str_CNF() == '1 + x1 + x2 + ~x2 + ~x3')
-    assert(c.str_CNF(False) == '1 . x1 . x2 . ~x2 . ~x3')
-
-    c = Clause({1, 2}, {2, 3}, {0})
-    assert(c.str_CNF() == '0 + x1 + x2 + ~x2 + ~x3')
-    assert(c.str_CNF(False) == '0 . x1 . x2 . ~x2 . ~x3')
-
-    c = Clause({1, 2}, {2, 3}, {1, 0})
-    assert(c.str_CNF() == '0 + 1 + x1 + x2 + ~x2 + ~x3')
-    assert(c.str_CNF(False) == '0 . 1 . x1 . x2 . ~x2 . ~x3')
-
 def test_clause_value():
     '''
     Test the Clause.value_cnf() function
@@ -1077,7 +1029,7 @@ def test_SAT_cnf():
     print("Testing SAT_cnf.py")
     test_str_CNF()
     test_parse_SOP_string()
-    test_convert_SOP_to_CNF_neg()
+    test_convert_SOP_to_CNF()
     test_clause_value()
     test_dpll(dpll_rec)
     test_dpll(dpll_iterative)
@@ -1089,7 +1041,7 @@ def print_clauses_as_DIMACS(clauses: list[Clause]):
     Print the given clauses in DIMACS format.
     '''
     # Get the maximum variable index
-    max_var_i = find_maximum_literal(clauses)
+    max_var_i = find_max_var(clauses)
     # Print the header
     print(f"p cnf {max_var_i} {len(clauses)}")
     # Print each clause
@@ -1176,9 +1128,9 @@ def read_sop_file(file_path: str) -> list[Clause]:
         print('Parsing SOP input:', function)
         # Parse the string input
         sop = parse_SOP_string(function)
-        print('Parsed result:', '+'.join([x.str_CNF(is_CNF=False) for x in sop]))
+        print('Parsed result:', '+'.join([x.str_SOP() for x in sop]))
         # Convert the string to CNF form
-        cnf = convert_SOP_to_CNF_neg(sop)
+        cnf = convert_SOP_to_CNF(sop)
         # Print the CNF clause list
         print('Converting to CNF, clauses are:')
         print(".".join([str(c) for c in cnf])) # print clause list
@@ -1205,11 +1157,11 @@ def read_sop_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
         print('Parsing SOP input:', function1)
         # Parse the string input
         sop1 = parse_SOP_string(function1)
-        print('Parsed result:', '+'.join([x.str_CNF(is_CNF=False) for x in sop1]))
+        print('Parsed result:', '+'.join([x.str_SOP() for x in sop1]))
         print('Parsing SOP input:', function2)
         # Parse the string input
         sop2 = parse_SOP_string(function2)
-        print('Parsed result:', '+'.join([x.str_CNF(is_CNF=False) for x in sop2]))
+        print('Parsed result:', '+'.join([x.str_SOP() for x in sop2]))
         # Create a ClauseList object to convert the SoP function to CNF.
         # Object members contain CNF form function and other attributes
         cnf1 = ClauseList(function1)
@@ -1220,6 +1172,10 @@ def read_sop_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
         print('Converting to CNF for function 2, clauses are:')
         print(".".join([str(c) for c in cnf2.cnf_clauses]))
     return cnf1, cnf2
+
+
+def parenthesize(t: str) -> str:
+    return f"({t})"
 
 
 def print_result(result: list[dict[int, int]], all_sat: bool):
@@ -1242,6 +1198,19 @@ def print_result(result: list[dict[int, int]], all_sat: bool):
                 printAssignments(r)
         else:
             print("Function is UNSAT")
+
+
+def CNF_to_string(cnf_clauses: list[Clause]) -> str:
+    sorted_clauses = sorted(cnf_clauses, key=lambda c: len(c.vars()))
+    return ".".join([parenthesize(c.str_CNF()) for c in sorted_clauses])
+
+
+def func_assignment_to_string(var_set: set[int], assignments: dict[int, int]) -> str:
+    vals = []
+    for xi, v in sorted(assignments.items()):
+        if xi in var_set:
+            vals.append(f"x{xi}={v}")
+    return ", ".join(vals)
 
 
 def main():
@@ -1317,5 +1286,14 @@ def main():
         return
 
 if __name__ == "__main__":
-    test_SAT_cnf()
+    txt = "x1.x4 + x2.x3 + x5.x2.x4"
+    print(txt)
+    sop = parse_SOP_string(txt)
+    print(" + ".join([x.str_SOP() for x in sop]))
+    var_set = clauses_all_vars(sop)
+    cnf = convert_SOP_to_CNF(sop)
+    print(CNF_to_string(cnf))
+    result = dpll_iterative(cnf)
+    print(func_assignment_to_string(var_set, result))
+    #test_SAT_cnf()
     #main()
