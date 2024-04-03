@@ -515,6 +515,7 @@ def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> d
     return assignments
 
 
+# TODO: add unit propagation / other optimizations
 def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int] | None = None) -> dict[int, int]:
     '''
     The recursive function implementation for dpll().
@@ -578,6 +579,7 @@ def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, v
         return assignments # SAT
 
 
+# TODO: add unit propagation / other optimizations
 def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int]|None=None) -> dict[int, int]:
     '''
     The iterative function implementation for dpll().
