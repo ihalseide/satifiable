@@ -57,6 +57,20 @@ class Clause:
         self.literals: set[int] = set(literals)
         self.isUnit = False
 
+    def __str__(self) -> str:
+        '''
+        Get a readable string version of this clause.
+        This method gets called automatically by str().
+        '''
+        return f"Clause(positives={self.positives}, negatives={self.negatives}, literals={self.literals})"
+
+    def __repr__(self) -> str:
+        '''
+        String representation for a clause, just use the same readable version.
+        This method is called automatically by repr() and str().
+        '''
+        return self.__str__()
+
     def remove(self, xi: int):
         try: self.positives.remove(xi)
         except KeyError: pass
@@ -102,20 +116,6 @@ class Clause:
         Return the (new instance) negation of this clause.
         '''
         return Clause(self.negatives.copy(), self.positives.copy(), self.literals.copy())
-
-    def __str__(self) -> str:
-        '''
-        Get a readable string version of this clause.
-        This method gets called automatically by str().
-        '''
-        return f"Clause(positives={self.positives}, negatives={self.negatives}, literals={self.literals})"
-
-    def __repr__(self) -> str:
-        '''
-        String representation for a clause, just use the same readable version.
-        This method is called automatically by repr() and str().
-        '''
-        return self.__str__()
     
     def str_CNF(self, is_CNF=True):
         all = sorted(self.variables())
@@ -132,6 +132,28 @@ class Clause:
             return "(" + (" + ".join(string_literals)) + ")"
         else:
             return " . ".join(string_literals)
+        
+    def value_cnf(self, assignments: dict[int,int]) -> str:
+        '''Return the value this CNF clause has given the assignments.'''
+        # SAT if clause is empty
+        if not self.positives and not self.negatives and not self.literals:
+            return SAT
+        # SAT if clause has a literal 1
+        if 1 in self.literals:
+            return SAT
+        # SAT if any positive literal is 1
+        for pos_xi in self.positives:
+            if assignments.get(pos_xi) == 1:
+                return SAT
+        # SAT if any negative literal is 0
+        for neg_xi in self.negatives:
+            if assignments.get(neg_xi) == 0:
+                return SAT
+        return UNSAT
+
+    def neg_value_cnf(self, assignments: dict[int,int]) -> int|str:
+        '''Return the negated/inverted value this CNF clause has given the assignments.'''
+        return value_negation(self.value_cnf(assignments))
 
 
 class ClauseList:
@@ -173,9 +195,6 @@ def value_negation(x):
     elif x == NEG_LIT: return POS_LIT
     else: return x
 
-def parse_SOP_term(term: str) -> Clause:
-    raise NotImplementedError()
-
 def parse_SOP_string(text: str) -> list[Clause]: # not CNF clauses!
     '''
     Parses a Sum-of-Products boolean function string.
@@ -192,8 +211,6 @@ def parse_SOP_string(text: str) -> list[Clause]: # not CNF clauses!
     NOTE: this function parses pretty greedily and optimistically and may accept and
         parse strings that are not exactly in the right syntax, such as with double
         negatives, multiple dots, extra letters, etc.
-
-    [Izak is responsible for this function.]
     '''
     # Make sure only this subset of characters is in the input string
     if not re.match(r"^([ \r\n.~+x0-9])+$", text, flags=re.IGNORECASE):
@@ -203,7 +220,7 @@ def parse_SOP_string(text: str) -> list[Clause]: # not CNF clauses!
     terms = text.split('+')
     # pattern to match one postive or negative literal
     # - group #1 captures the optional inversion prefix '~'
-    # - group #2 captures the variable subscript number (the i value in "xi")
+    # - group #2 captures the variable subscript number (the i value in "x_i")
     literal_pat = re.compile(r"^(~?)\s*x(\d+)$", re.IGNORECASE)
     for term in terms:
         # get all of the literals in this term
