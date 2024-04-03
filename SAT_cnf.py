@@ -293,6 +293,8 @@ def convert_SOP_to_CNF_neg(productTerms: list[Clause]) -> list[Clause]:
     '''
     Convert a list of SOP clauses representing a boolean function, F,
     (like from the result of parse_SOP_string) to a list of CNF clauses that represent ~F.
+
+    NOTE: there is no regular `convert_SOP_to_CNF` (non-negated) function, because that is also a NP-Hard problem!.
     '''
     # These are the CNF clauses which represent ~F.
     return [ clause.negation() for clause in productTerms ]
@@ -434,11 +436,11 @@ def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> d
 def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int] | None = None) -> dict[int, int]:
     '''
     The recursive function implementation for dpll().
-    Takes in a list of CNF clauses and a dictionary of decisions.
-    Returns: the assignments for literals that make the SAT problem true,
-    which is an empty dictionary if the function is UNSAT.
-
-    NOTE: keep this function because it is useful for validating the iterative version !!!
+    Arguments:
+    - `clauses` = represent the CNF clauses for the boolean function, F.
+    - `assignments` = current variable assignments (if any).
+    - `var_set` = set of variables which may be included in an assignment to evaluate the boolean function.
+    Returns: the assignment (if any) for the set of variables that make F be SAT.
     '''
     # By default, assignments are empty (vars are all unassigned).
     assignments = dict() if assignments is None else assignments
@@ -466,44 +468,42 @@ def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, v
         # At least one of the clauses is undecided.
         # Choose a literal to try to assign to 1 or to 0...
         # And try those options out by branching recursively.
-        xi: int|None = decide_literal(var_set, assignments)
+        xi = decide_literal(var_set, assignments)
         if xi is None:
             # There are no undecided literals, so we can't make any more decisions.
-            # This means that the function is UNSAT.
+            # This means that the function is UNSAT with previous assignments.
             return {}
-        # Try xi=1
-        assignments[xi] = 1
-        if (result := dpll_rec(clauses, assignments)):
-            # SAT
-            return result
-        # Try xi=0
-        assignments[xi] = 0
-        if (result := dpll_rec(clauses, assignments)):
-            # SAT
-            return result
-        # If both xi=1 and xi=0 failed, then this whole recursive branch is UNSAT.
-        # So return UNSAT to the callee (probably the previous recursive call).
-        del assignments[xi] # undo the decision
-        return {} # UNSAT
+        else:
+            # Try both possibilities of assigning xi (choose the order randomly)
+            value1: int = random.choice((0, 1))
+            value2: int = 1 - value1 # inverts value1
+            assignments[xi] = value1
+            if (result := dpll_rec(clauses, assignments)):
+                # SAT
+                return result
+            # Try xi=0
+            assignments[xi] = value2
+            if (result := dpll_rec(clauses, assignments)):
+                # SAT
+                return result
+            # If both xi=1 and xi=0 failed, then this whole recursive branch is UNSAT.
+            # So return UNSAT to the callee (probably the previous recursive call).
+            del assignments[xi] # undo the decision
+            return {} # UNSAT
     else:
         # If no clauses are UNSAT and no clauses are undecided,
         # then all clauses are SAT and the whole function is SAT!
         return assignments # SAT
 
 
-def dpll_rec_neg(clauses: list[Clause], var_set: set[int]) -> dict[int, int]:
-    '''
-    Does a DPLL SAT search on the list of clauses for a boolean function, but with the function negated.
-    This means:
-    - a result of SAT means that an assignment was found that sets the function to 0
-    - a result of UNSAT means that no assignment was found that sets the function to 0
-    '''
-    raise NotImplementedError()
-
-
 def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int]|None=None) -> dict[int, int]:
     '''
-    Implementation of DPLL using a loop instead of recursion.
+    The iterative function implementation for dpll().
+    Arguments:
+    - `clauses` = represent the CNF clauses for the boolean function, F.
+    - `assignments` = current variable assignments (if any).
+    - `var_set` = set of variables which may be included in an assignment to evaluate the boolean function.
+    Returns: the assignment (if any) for the set of variables that make F be SAT.
     '''
     # global for saving the original list of clauses derived
     #global original_clauses
@@ -582,16 +582,6 @@ def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = N
 
     # UNSAT due to no more possible assignments on the stack.
     return {} # UNSAT
-
-
-def dpll_iterative_neg(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int]|None=None) -> dict[int, int]:
-    '''
-    Does a DPLL SAT search on the list of clauses for a boolean function, but with the function negated.
-    This means:
-    - a result of SAT means that an assignment was found that sets the function to 0
-    - a result of UNSAT means that no assignment was found that sets the function to 0
-    '''
-    raise NotImplementedError()
 
 
 def make_blocking_clause(assignments: dict[int,Any]) -> Clause:
