@@ -35,6 +35,10 @@ class Clause(object):
     the value of ~F UNSAT, which makes F be SAT.
     '''
 
+    # Prevent the addition of extra attributes to `Clause` instances.
+    __slots__ = "positives", "negatives", "literals"
+
+
     def __init__(self, positives: Iterable[int] | None = None, negatives: Iterable[int] | None = None, literals: Iterable[int]|None = None):
         '''
         Creating a new Clause, arguments:
@@ -59,7 +63,7 @@ class Clause(object):
 
     def __hash__(self):
         '''
-        This method is implemented so we can put `Clause`s in a `set`.
+        This method is implemented so we can put `Clause`s inside a `set`.
         Reference: [https://stackoverflow.com/questions/2909106/whats-a-correct-and-good-way-to-implement-hash]
         '''
         return hash(self.__key())
@@ -99,14 +103,14 @@ class Clause(object):
         return self.positives.union(self.negatives)
     
 
-    def var_polarities(self) -> dict[int, int|str|None]:
+    def polarity_of_all(self) -> dict[int, int | str | None]:
         '''
-        Get the list of pairs where each pair is (variable, polarity).
+        Get the dictionary of all variables with their polarities within this clause.
         '''
-        return { i: self.var_polarity(i) for i in self.vars() }
+        return { i: self.polarity_of(i) for i in self.vars() }
 
 
-    def var_polarity(self, xi: int) -> int|str|None:
+    def polarity_of(self, xi: int) -> int | str | None:
         '''
         Get the polarity of a given variable number `xi` within this clause.
         '''
@@ -120,60 +124,42 @@ class Clause(object):
             return POS_LIT
         else:
             return None
+        
 
+    def _string_vars(self) -> list[str]:
+        '''Internal helper function for `str_DNF` and `str_CNF`'''
+        result = []
+        for lit in self.literals:
+            result.append(str(lit))
 
-    def negation(self) -> 'Clause':
-        '''
-        Return the (new instance) negation of this clause.
-        '''
-        # Switch the negatives and positives
-        return Clause(self.negatives, self.positives, self.literals.copy())
-    
+        for i in sorted(self.vars()):
+            if i in self.positives:
+                result.append(f"x{i}")
+            if i in self.negatives:
+                result.append(f"~x{i}")
+        return result
+
 
     def str_DNF(self) -> str:
-        all = sorted(self.vars())
-        string_literals = []
-        for lit in self.literals:
-            string_literals.append(str(lit))
-        for i in all:
-            if i in self.positives:
-                string_literals.append(f"x{i}")
-            if i in self.negatives:
-                string_literals.append(f"~x{i}")
-        return " . ".join(string_literals)
+        '''Get the string version of this clause as if it is in DNF form.'''
+        return " . ".join(self._string_vars())
 
 
     def str_CNF(self) -> str:
-        all = sorted(self.vars())
-        string_literals = []
-        for lit in self.literals:
-            string_literals.append(str(lit))
-        for i in all:
-            if i in self.positives:
-                string_literals.append(f"x{i}")
-            if i in self.negatives:
-                string_literals.append(f"~x{i}")
-        return " + ".join(string_literals)
+        '''Get the string version of this clause as if it is in CNF form.'''
+        return " + ".join(self._string_vars())
             
         
-    def undecided_vars(self, assignments: dict[int, int]) -> frozenset[int]:
+    def undecided_given(self, assignments: dict[int, int]) -> frozenset[int]:
         '''
         Return the set of undecided variables within this clause given the specific assignments so far.
         '''
         return self.vars().difference(assignments.keys())
-    
-
-    def status_cnf(self, assignments: dict[int,int]) -> tuple[str, frozenset[int]]:
-        '''
-        Returns the "status" of this `Clause` given the `assignments`.
-        The status returned is a tuple of: (the clause's value, and the set of the clause's undecided variables).
-        '''
-        return (self.value_cnf(assignments), self.undecided_vars(assignments)) 
 
 
-    def value_cnf(self, assignments: dict[int,int]) -> str:
+    def value_given(self, assignments: dict[int,int]) -> str:
         '''
-        Return the value this as a CNF clause if it has given the assignments.
+        Return the evaluated value this as a CNF clause if it is given the `assignments`.
         - A clause is SAT if at least ONE literal evaluates to True
         - A clause is UNSAT if all literals evaluate to False
         - A clause is UNDECIDED if at least ONE literal is unassigned (This includes "unit" Clauses)
@@ -207,6 +193,14 @@ class Clause(object):
             return UNDECIDED
         else:
             return UNSAT
+    
+
+    def status_given(self, assignments: dict[int,int]) -> tuple[str, frozenset[int]]:
+        '''
+        Returns the "status" of this CNF `Clause` given the `assignments`.
+        The status returned is a tuple of: (the clause's value, and the set of the clause's undecided variables).
+        '''
+        return (self.value_given(assignments), self.undecided_given(assignments)) 
 
 
 class ClauseList:
@@ -333,7 +327,7 @@ def convert_DNF_to_CNF(product_terms: list[Clause]) -> list[Clause]:
     if len(product_terms) == 1:
         # Only one term, so expand it out into 1-variable CNF clauses
         term = product_terms[0]
-        for x_i, polarity in term.var_polarities().items():
+        for x_i, polarity in term.polarity_of_all().items():
             if polarity == POS_LIT:
                 result.append(Clause({x_i}, []))
             elif polarity == NEG_LIT:
@@ -370,12 +364,12 @@ def convert_DNF_to_CNF(product_terms: list[Clause]) -> list[Clause]:
                 num_vars = len(term.vars())
                 if num_vars > 1:
                     # Create AND gate for this product term
-                    add_GCF_for_and(result, term.var_polarities(), xi)
+                    add_GCF_for_and(result, term.polarity_of_all(), xi)
                     or_inputs[xi] = POS_LIT
                     xi += 1
                 elif num_vars == 1:
                     # (Shortcut) Wire directly to the big OR GCF later
-                    var, polarity = tuple(term.var_polarities().items())[0]
+                    var, polarity = tuple(term.polarity_of_all().items())[0]
                     assert(polarity == POS_LIT or polarity == NEG_LIT)
                     or_inputs[var] = int(polarity)
             # Combine into one big OR gate
@@ -494,12 +488,12 @@ def unit_decisions(clauses: frozenset[Clause], var_set: set[int], current_assign
     new_decisions: dict[int, int] = {}
     # Look for the variables of unit clauses
     for clause in clauses:
-        undecided = var_set.intersection(clause.undecided_vars(current_assignments))
+        undecided = var_set.intersection(clause.undecided_given(current_assignments))
         #print(f"clause has undecided vars: {undecided}")
         if len(undecided) == 1:
             # Unit clause
             xi = next(iter(undecided))
-            polarity = clause.var_polarity(xi)
+            polarity = clause.polarity_of(xi)
             already = new_decisions.get(xi)
             if already is not None and already != polarity:
                 # Conflict
@@ -539,7 +533,7 @@ def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, v
     
     anyUndecidedClause: bool = False
     for clause in clauses:
-        value = clause.value_cnf(assignments)
+        value = clause.value_given(assignments)
         if value == UNSAT:
             # If any clause is UNSAT, then the whole function is UNSAT.
             return {} # UNSAT
@@ -618,7 +612,7 @@ def dpll_iterative(original_clauses: list[Clause], assignments: dict[int, int] |
     if starting_xi is None:
         # At this point, perhaps the unit assignment may or may not have made the function SAT.
         for clause in clauses:
-            value = clause.value_cnf(assignments1)
+            value = clause.value_given(assignments1)
             if value == UNSAT:
                 return {} # UNSAT
             elif value == UNDECIDED:
@@ -646,7 +640,7 @@ def dpll_iterative(original_clauses: list[Clause], assignments: dict[int, int] |
         undecided_clauses: set[Clause] = set()
         an_UNSAT_clause: Clause|None = None
         for clause in clauses:
-            value = clause.value_cnf(current_assignments)
+            value = clause.value_given(current_assignments)
             if value == UNSAT:
                 # If any clause is UNSAT, then the whole function is UNSAT.
                 an_UNSAT_clause = clause
@@ -773,30 +767,30 @@ def test_clause_value():
     c = Clause([1], [])
 
     # postive literal is set to 1
-    v = c.value_cnf({1:1})
+    v = c.value_given({1:1})
     assert(v == SAT)
 
     # Setting clause with only one literal to 0
-    v = c.value_cnf({1:0})
+    v = c.value_given({1:0})
     assert(v == UNSAT)
 
     # The only literal is undecided
-    v = c.value_cnf({1:None})
+    v = c.value_given({1:None})
     assert(v == UNDECIDED)
 
     # Test one negative literal (~x1)
     c = Clause([], [1])
 
     # assign the literal to 1, which makes the clause false
-    v = c.value_cnf({1:1})
+    v = c.value_given({1:1})
     assert(v == UNSAT)
 
     # assign the literal to 0, which makes the clause true
-    v = c.value_cnf({1:0})
+    v = c.value_given({1:0})
     assert(v == SAT)
 
     # The only literal is undecided
-    v = c.value_cnf({1:None})
+    v = c.value_given({1:None})
     assert(v == UNDECIDED)
 
     # Test a clause with 2 literals
@@ -813,7 +807,7 @@ def test_clause_value():
         ({1:None, 2:1}, SAT),
     ]
     for assignment, expected in testPairs2:
-        actual = c.value_cnf(assignment)
+        actual = c.value_given(assignment)
         try:
             assert(actual == expected)
         except AssertionError:
@@ -837,7 +831,7 @@ def test_clause_value():
         ({1:None, 2:0, 3:None}, UNDECIDED),
     ]
     for assignment, expected in testPairs3:
-        v = c.value_cnf(assignment)
+        v = c.value_given(assignment)
         try:
             assert(v == expected)
         except AssertionError:
@@ -1009,30 +1003,30 @@ def test_convert_DNF_to_CNF():
         sop = [ Clause([xi], []) ] # "xi"
         cnf = convert_DNF_to_CNF(sop) # "(xi)"
         assert(cnf[0].vars() == {xi})
-        assert(cnf[0].var_polarity(xi) == POS_LIT)
+        assert(cnf[0].polarity_of(xi) == POS_LIT)
 
         # negative clauses
         sop = [ Clause([], [xi]) ] # "~xi"
         cnf = convert_DNF_to_CNF(sop) # "(~xi)"
         assert(cnf[0].vars() == {xi})
-        assert(cnf[0].var_polarity(xi) == NEG_LIT)
+        assert(cnf[0].polarity_of(xi) == NEG_LIT)
 
     # try a single SOP clause with 2 variables
     sop = [ Clause([1, 2], []) ] # "x1 . x2"
     cnf = convert_DNF_to_CNF(sop) # should be "(x1)(x2)"
     assert(len(cnf) == 2)
     assert(cnf[0].vars() == {1})
-    assert(cnf[0].var_polarity(1) == POS_LIT)
+    assert(cnf[0].polarity_of(1) == POS_LIT)
     assert(cnf[1].vars() == {2})
-    assert(cnf[1].var_polarity(2) == POS_LIT)
+    assert(cnf[1].polarity_of(2) == POS_LIT)
 
     # try a single SOP clause with 2 variables
     sop = [ Clause([1], [2]) ] # "x1 . ~x2"
     cnf = convert_DNF_to_CNF(sop) # should be "(x1)(~x2)"
     assert(len(cnf) == 2)
     assert(cnf[0].vars() == {1})
-    assert(cnf[0].var_polarity(1) == POS_LIT)
-    assert(cnf[1].var_polarity(2) == NEG_LIT)
+    assert(cnf[0].polarity_of(1) == POS_LIT)
+    assert(cnf[1].polarity_of(2) == NEG_LIT)
 
     # try a single SOP clause with conflicting variables
     error = False
@@ -1040,7 +1034,7 @@ def test_convert_DNF_to_CNF():
         sop = [ Clause([99], [99]) ] # "xi . ~xi"
         cnf = convert_DNF_to_CNF(sop) # should be "(xi . ~x1)""
         assert(cnf[0].vars() == {99})
-        assert(cnf[0].var_polarity(99) == 'BOTH')
+        assert(cnf[0].polarity_of(99) == 'BOTH')
     except ValueError:
         error = True
     assert(error)
@@ -1068,7 +1062,7 @@ def print_clauses_as_DIMACS(clauses: list[Clause]):
     # Print each clause
     for clause in clauses:
         # Get the list of literals in the clause
-        literals = sorted(clause.var_polarities().items())
+        literals = sorted(clause.polarity_of_all().items())
         # Print the literals in the clause
         for var_i, value in literals:
             if value == POS_LIT:
