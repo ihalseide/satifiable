@@ -56,7 +56,12 @@ class Clause:
         self.positives: set[int] = set(positives)
         self.negatives: set[int] = set(negatives)
         self.literals: set[int] = set(literals)
-        self.isUnit = False
+        #self.isUnit = False
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Clause):
+            return NotImplemented
+        return (self.positives == other.positives) and (self.negatives == other.negatives) and (self.literals == other.literals)
 
     def __str__(self) -> str:
         '''
