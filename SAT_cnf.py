@@ -118,13 +118,15 @@ class Clause:
         else:
             return None
 
+
     def negation(self) -> 'Clause':
         '''
         Return the (new instance) negation of this clause.
         '''
         return Clause(self.negatives.copy(), self.positives.copy(), self.literals.copy())
     
-    def str_CNF(self, is_CNF=True):
+
+    def str_SOP(self) -> str:
         all = sorted(self.vars())
         string_literals = []
         for lit in self.literals:
@@ -134,11 +136,28 @@ class Clause:
                 string_literals.append(f"x{i}")
             if i in self.negatives:
                 string_literals.append(f"~x{i}")
+        return " . ".join(string_literals)
 
-        if is_CNF:
-            return " + ".join(string_literals)
-        else:
-            return " . ".join(string_literals)
+
+    def str_CNF(self) -> str:
+        all = sorted(self.vars())
+        string_literals = []
+        for lit in self.literals:
+            string_literals.append(str(lit))
+        for i in all:
+            if i in self.positives:
+                string_literals.append(f"x{i}")
+            if i in self.negatives:
+                string_literals.append(f"~x{i}")
+        return " + ".join(string_literals)
+            
+        
+    def undecided_vars(self, assignments: dict[int, int]) -> set[int]:
+        '''
+        Return the set of undecided variables within this clause given the specific assignments so far.
+        '''
+        assigned = set(assignments.keys())
+        return self.vars().difference(assigned)
         
     def value_cnf(self, assignments: dict[int,int]) -> str:
         '''
