@@ -222,7 +222,7 @@ class ClauseList:
         # Store CNF clauses in this member
         self.cnf_clauses = convert_DNF_to_CNF(self.sop_clauses)
         # Store the max variable from the SOP function input in this member
-        self.input_max = find_max_var(self.sop_clauses)
+        self.input_max = find_clauses_highest_var(self.sop_clauses)
 
         # Keep a count of the index where the max input variable 
         # in SoP form is and store in this member
@@ -361,7 +361,7 @@ def convert_DNF_to_CNF(product_terms: list[Clause]) -> list[Clause]:
             return result
         else:
             # Multiple terms with multiple variables
-            xi = find_max_var(product_terms) + 1
+            xi = find_clauses_highest_var(product_terms) + 1
             or_first_in_i = xi
             # Keep track of the inputs to the OR gate, and their polarities.
             or_inputs: dict[int, int] = {}
@@ -385,7 +385,7 @@ def convert_DNF_to_CNF(product_terms: list[Clause]) -> list[Clause]:
             return result
 
 
-def add_GCF_for_and(to_list: list[Clause], input_vars: dict[int, int], term_output_var: int):
+def add_GCF_for_and(to_list: list[Clause], input_vars: dict[int, int | str | None], term_output_var: int):
     '''
     Helper function for convert_SOP_to_CNF().
     (GCF stands for Gate Consistency Function.)
@@ -465,7 +465,7 @@ def add_GCF_for_or(to_list: list[Clause], input_vars: dict[int, int], output_var
     to_list.append(Clause(summation_positives, summation_negatives))
 
 
-def find_max_var(clauses: list[Clause]) -> int:
+def find_clauses_highest_var(clauses: Iterable[Clause]) -> int:
     '''
     Find the maximum variable index in a list of CNF clauses.
     This is useful for knowing the upper limit of how many variables there are in a boolean function.
@@ -727,7 +727,7 @@ def find_all_SAT(clauses: list[Clause], solver_func=dpll_rec) -> list[dict[int, 
     return solutions
 
 
-def xor_CNF_functions(clauses_a: ClauseList, clauses_b: ClauseList) -> list[Clause]:
+def xor_CNF_functions(clauses_a: Iterable[Clause], clauses_b: Iterable[Clause]) -> list[Clause]:
     '''
     Given two boolean functions, combine them with XOR and return a new clause list
     that represents this combination.
@@ -741,29 +741,26 @@ def xor_CNF_functions(clauses_a: ClauseList, clauses_b: ClauseList) -> list[Clau
 
     # Get the output literals from the functions, so we can use them as
     # inputs for the GCFs
-    a_out = find_max_var(clauses_a.cnf_clauses)
-    b_out = find_max_var(clauses_b.cnf_clauses)
+    a_out = find_clauses_highest_var(clauses_a)
+    b_out = find_clauses_highest_var(clauses_b)
 
     # Get the next variable index that would come after those, so we can
     # introduce new variables to implement GCFs.
-    next_literal_i = 1 + max((a_out, b_out,))
+    next_literal_i = 1 + max(a_out, b_out)
 
     # These are the new variables for the gate outputs
     not_a_yes_b_out = next_literal_i + 1 # for the first AND gate output
     yes_a_not_b_out = next_literal_i + 2 # for the second AND gate output
     or_out = next_literal_i + 3 # for the final OR gate output
 
-    # Implement AND gate for: ~a.b -> not_a_yes_b_out
-    not_a_yes_b_clause = Clause([b_out], [a_out])
-    add_GCF_for_and(clauses_result, not_a_yes_b_clause.data, not_a_yes_b_out)
+    # Implement AND gate for: (~a . b) -> not_a_yes_b_out
+    add_GCF_for_and(clauses_result, { a_out: NEG_LIT, b_out: POS_LIT }, not_a_yes_b_out)
 
-    # Implement AND gate for: a.~b -> yes_a_not_b_out
-    yes_a_not_b_clause = Clause([a_out], [b_out])
-    add_GCF_for_and(clauses_result, yes_a_not_b_clause.data, yes_a_not_b_out)
+    # Implement AND gate for: (a . ~b) -> yes_a_not_b_out
+    add_GCF_for_and(clauses_result, { a_out: POS_LIT, b_out: NEG_LIT }, yes_a_not_b_out)
 
     # Implement OR gate for combining the above two AND gates
-    or_input_vars = [not_a_yes_b_out, yes_a_not_b_out]
-    add_GCF_for_or(clauses_result, or_input_vars, or_out)
+    add_GCF_for_or(clauses_result, { not_a_yes_b_out: POS_LIT, yes_a_not_b_out: POS_LIT }, or_out)
 
     return clauses_result
 
@@ -1085,7 +1082,7 @@ def print_clauses_as_DIMACS(clauses: list[Clause]):
     Print the given CNF clauses in DIMACS format.
     '''
     # Get the maximum variable index
-    max_var_i = find_max_var(clauses)
+    max_var_i = find_clauses_highest_var(clauses)
     # Print the header
     print(f"p cnf {max_var_i} {len(clauses)}")
     # Print each clause
