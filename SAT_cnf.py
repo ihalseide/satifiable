@@ -1121,33 +1121,6 @@ def read_DNF_file(file_path: str) -> tuple[list[Clause], set[int]]:
         return cnf, original_vars
 
 
-def read_DNF_file_xor(file_path: str) -> tuple[list[Clause], list[Clause]]:
-    '''
-    Function to read the plain text SoP functions. Should only be used for XOR operation
-    Requires two functions in the plain text file. They will be XOR'd together
-    Will read the first function on line 1.
-    - `~` represents NOT
-    - `.` represents AND
-    - `+` represents OR
-    - `xi` represents literal where `i` is the 'subscript'
-
-    Returns a tuple ClauseList objects for the given function
-    '''
-    with open(file_path, "r") as file:
-        # Read first line of the file. This should be the function in SoP form
-        function1 = file.readline()
-        # Read second line of the file. This should be the function in SoP form
-        function2 = file.readlines()[0]
-        # Parse the string input
-        sop1 = parse_DNF_string(function1)
-        sop2 = parse_DNF_string(function2)
-        # Create a ClauseList object to convert the SoP function to CNF.
-        # Object members contain CNF form function and other attributes
-        cnf1 = convert_DNF_to_CNF(sop1)
-        cnf2 = convert_DNF_to_CNF(sop2)
-        return cnf1, cnf2
-
-
 def DNF_to_string(dnf_clauses: Iterable[Clause]) -> str:
     '''
     Turn a list of SOP clauses into a nice readable string.
@@ -1164,7 +1137,7 @@ def CNF_to_string(cnf_clauses: Iterable[Clause]) -> str:
     return ".".join([f"({c.str_CNF()})" for c in sorted_clauses])
 
 
-def func_assignment_to_string(var_set: set[int], assignments: dict[int, int]) -> str:
+def assignment_to_string(var_set: set[int], assignments: dict[int, int]) -> str:
     '''
     Turn a dictionary of variable assignments into a nice readable string.
     '''
@@ -1179,7 +1152,7 @@ def _sat_result(cnf, variables):
     print("Running SAT...")
     sol = dpll_iterative(cnf)
     if sol:
-        print("found SAT solution:", func_assignment_to_string(variables, sol))
+        print("found SAT solution:", assignment_to_string(variables, sol))
     else:
         print("UNSAT")
     # for f in (dpll_iterative, dpll_rec):
