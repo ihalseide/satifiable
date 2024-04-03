@@ -33,35 +33,82 @@ mutual2.add_argument('-s', '--one-dimacs', required=False, help="Find one soluti
 class Clause:
     '''
     Clause class, which represents a clause in (CNF) Conjunctive Normal Form.
-    '''
-    def __init__(self, number, data: dict[int, Any]):
-        #Assign number to the clause
-        self.number = number
- 
-        # Assign data to clause. Should be the CNF clause
-        # Maps variable index to -> whether it is a POSITIVE or NEGATIVE literal.
-        # For example, a variable index of `1` means the boolean function input variable "x1"
-        self.data: dict[int,Any] = data
 
+    When this class is used in the SAT-search algorithms, a CNF clause goes to the inverted/negated boolean function ~F,
+    which means that SAT will actually be looking for assignments that set all clauses to have a value of 0, which makes
+    the value of ~F UNSAT, which makes F be SAT.
+    '''
+
+    def __init__(self, positives:set[int]|list[int], negatives:set[int]|list[int], literals:set[int]|list[int]=set()):
+        '''
+        Creating a new Clause, arguments:
+        - `positives` = set of variables which are positive (like x1, x2, x99)
+        - `negatives` = set of variables which are negative (like ~x1, ~x2, ~x99)
+        - `literals` = set of literal 1's or 0's values already in the clause
+
+        Examples:
+        - Clause([1,2,4], [3,5]) represents the CNF clause: "(x1 + x2 + ~x3 + x4 + ~x5)"
+        - Clause([3,2], []) represents the CNF clause: "(x3 + x2)"
+        - Clause([], [6]) represents the CNF clause: "(~x6)"
+        - Clause([], []) represents an (empty) CNF clause: "()"
+        '''
+        self.positives: set[int] = set(positives)
+        self.negatives: set[int] = set(negatives)
+        self.literals: set[int] = set(literals)
         self.isUnit = False
 
-    def sortedVars(self):
-        '''
-        Get all of the variable indices and values, sorted by increasing variable index.
-        Example: [(1,0),(2,0),(3,1)] is the output for a clause like "(x3 + ~x1 + ~x2)"
-        '''
-        return sorted(self.data.items())
+    def remove(self, xi: int):
+        try: self.positives.remove(xi)
+        except KeyError: pass
 
-    def __str__(self, isCNF:bool=True) -> str:
+        try: self.negatives.remove(xi)
+        except KeyError: pass
+
+    def contains(self, xi: int) -> bool:
+        '''
+        Returns true if this Clause contains the given variable (index).
+        '''
+        return (xi in self.positives) or (xi in self.negatives)
+    
+    def variables(self) -> set[int]:
+        '''
+        Get the set of all variables in this clause.
+        '''
+        return set.union(self.positives, self.negatives)
+    
+    def var_polarities(self) -> dict[int, int|str|None]:
+        '''
+        Get the list of pairs where each pair is (variable, polarity).
+        '''
+        return { i: self.var_polarity(i) for i in self.variables() }
+
+    def var_polarity(self, xi:int) -> int|str|None:
+        '''
+        Get the polarity of a given variable number `xi` within this clause.
+        '''
+        pos = xi in self.positives
+        neg = xi in self.negatives
+        if pos and not neg:
+            return POS_LIT
+        elif neg and not pos:
+            return NEG_LIT
+        elif neg and pos:
+            return 'BOTH'
+        else:
+            return None
+
+    def negation(self) -> 'Clause':
+        '''
+        Return the (new instance) negation of this clause.
+        '''
+        return Clause(self.negatives.copy(), self.positives.copy(), self.literals.copy())
+
+    def __str__(self) -> str:
         '''
         Get a readable string version of this clause.
         This method gets called automatically by str().
         '''
-        # get list of variable names, where negated variables are prefixed with '~'
-        vars: list[str] = [f"x{i}" if (v == 1) else f"~x{i}" for i, v in self.sortedVars()]
-        # join the variable names together with '+' or '.'
-        sep: str = " + " if isCNF else " . "
-        return f"({sep.join(vars)})"
+        return f"Clause(positives={self.positives}, negatives={self.negatives}, literals={self.literals})"
 
     def __repr__(self) -> str:
         '''
@@ -69,6 +116,22 @@ class Clause:
         This method is called automatically by repr() and str().
         '''
         return self.__str__()
+    
+    def str_CNF(self, is_CNF=True):
+        all = sorted(self.variables())
+        string_literals = []
+        for lit in self.literals:
+            string_literals.append(str(lit))
+        for i in all:
+            if i in self.positives:
+                string_literals.append(f"x{i}")
+            if i in self.negatives:
+                string_literals.append(f"~x{i}")
+
+        if is_CNF:
+            return "(" + (" + ".join(string_literals)) + ")"
+        else:
+            return " . ".join(string_literals)
 
 
 class ClauseList:
@@ -82,7 +145,7 @@ class ClauseList:
         # Store SOP clauses in this member
         self.sop_clauses = parse_SOP_string(sop_input)
         # Store CNF clauses in this member
-        self.cnf_clauses = convert_SOP_to_CNF(self.sop_clauses)
+        self.cnf_clauses = convert_SOP_to_CNF_neg(self.sop_clauses)
         # Store the max variable from the SOP function input in this member
         self.input_max = find_maximum_literal(self.sop_clauses)
 
@@ -91,7 +154,7 @@ class ClauseList:
         self.max_index_sop = 0
         for i in self.sop_clauses:
             # Get the max variable index in the list of keys from the clause
-            if max(list(i.data.keys())) == self.input_max:
+            if max(list(i.variables())) == self.input_max:
                 break
             else:
                 self.max_index_sop += 1
@@ -101,48 +164,17 @@ class ClauseList:
         
     def printClauseList(self):
         print(self.sop_clauses)
-        
 
-def make_CNF_clause(ones: set[int]|list[int], zeros: set[int]|list[int], number=0) -> Clause:
+def value_negation(x):
     '''
-    Create a Clause given:
-    - `ones`: the list/set of variables (as ints) that are POSITIVE literals (e.g. x1)
-    - `zeros`: the list/set of variables (as ints) that are NEGATIVE literals (e.g. ~x1)
-    - `number`: optional clause number/id
-
-    Examples:
-    - createClause([1,2,4], [3,5]) represents the CNF clause: "(x1 + x2 + ~x3 + x4 + ~x5)"
-    - createClause([3,2], []) represents the CNF clause: "(x3 + x2)"
-    - createClause([], [6]) represents the CNF clause: "(~x6)"
-    - createClause([], []) represents an (empty) CNF clause: "()"
-
-    [Izak is responsible for this function.]
+    Negate POS_LIT and NEG_LIT, otherwise keep the value.
     '''
-    return Clause(number=number, data=make_CNF_dict(ones, zeros))
+    if x == POS_LIT: return NEG_LIT
+    elif x == NEG_LIT: return POS_LIT
+    else: return x
 
-
-def make_CNF_dict(ones: set[int]|list[int], zeros: set[int]|list[int]) -> dict[int, int]:
-    '''
-    Create the data dictionary that maps literal indices to values (postive/negative literal)
-    (Helper function for make_CNF_clause).
-    - `ones`: the list/set of variables (as ints) that are POSITIVE literals (e.g. x1)
-    - `zeros`: the list/set of variables (as ints) that are NEGATIVE literals (e.g. ~x1)
-    Returns: dictionary, where keys are the literal indices,
-       and where values mark the literal's polarity (positive/negative).
-    [Izak is responsible for this function.]
-    '''
-    ones = set(ones)
-    zeros = set(zeros)
-    # if in_both := set.intersection(ones, zeros):
-    #     # NOTE: This might not be an error if this function is ever used to create new clauses in the actual SAT-solver algorithm.
-    #     raise ValueError(f"variables {in_both} should not appear as a positive literal and a negative literal")
-    d = dict()
-    for var_i in ones:
-        d[var_i] = POS_LIT
-    for var_i in zeros:
-        d[var_i] = NEG_LIT
-    return d
-
+def parse_SOP_term(term: str) -> Clause:
+    raise NotImplementedError()
 
 def parse_SOP_string(text: str) -> list[Clause]: # not CNF clauses!
     '''
@@ -172,49 +204,44 @@ def parse_SOP_string(text: str) -> list[Clause]: # not CNF clauses!
     # pattern to match one postive or negative literal
     # - group #1 captures the optional inversion prefix '~'
     # - group #2 captures the variable subscript number (the i value in "xi")
-    lit_pattern = re.compile('(~?) *x([0-9]+)', flags=re.IGNORECASE)
+    literal_pat = re.compile(r"^(~?)\s*x(\d+)$", re.IGNORECASE)
     for term in terms:
         # get all of the literals in this term
-        literals = lit_pattern.findall(term)
+        literals = term.split(".")
         # group the literals into positive and negative
-        positives = [int(i) for prefix, i in literals if not prefix]
-        negatives = [int(i) for prefix, i in literals if prefix]
-        clause = make_CNF_clause(positives, negatives)
-        clauses.append(clause)
+        positives: set[int] = set()
+        negatives: set[int] = set()
+        term_lits: set[int] = set()
+        for lit in literals:
+            lit = lit.strip()
+            if lit == "0":
+                # Literal zero
+                term_lits.add(0)
+            elif lit == "1":
+                # Literal one
+                term_lits.add(1)
+                pass
+            elif match := literal_pat.match(lit):
+                # Literal variable term
+                inv = match.group(1)
+                num = int(match.group(2))
+                if inv:
+                    negatives.add(num)
+                else:
+                    positives.add(num)
+            else:
+                raise ValueError(f"Invalid single literal in SOP term: \"{lit}\"")
+        clauses.append( Clause(positives, negatives, term_lits) )
     return clauses
 
 
-def convert_SOP_to_CNF(productTerms: list[Clause]) -> list[Clause]:
+def convert_SOP_to_CNF_neg(productTerms: list[Clause]) -> list[Clause]:
     '''
-    Convert a list of SOP clauses (like from the result of parse_SOP_string) to a list of CNF clauses.
-
-    Conversion technique: Gate Consistency Functions (GCF).
-
-    Return value: a list of CNF clauses.
-
-    NOTE: the highest literal/variable index in the CNF clauses is the output variable.
-
-    [Izak is responsible for this function.]
+    Convert a list of SOP clauses representing a boolean function, F,
+    (like from the result of parse_SOP_string) to a list of CNF clauses that represent ~F.
     '''
-    # Get the last/highest variable index value, xi:
-    max_var_i: int = find_maximum_literal(productTerms)
-    # Use this as the first new variable index that can be introduced:
-    extra_var_i = max_var_i + 1
-    # Literal index for the function's final output wire/literal
-    # (Each product term introduces one new literal, its output wire).
-    final_output_var_i = 1 + max_var_i + len(productTerms)
-    CNF: list[Clause] = []
-    # Add the CNF clauses from the AND terms from the SOP form
-    for i, term in enumerate(productTerms):
-        and_output_var = extra_var_i + i
-        add_GCF_for_and(CNF, term.data, and_output_var)
-    # Add the CNF clauses from the single OR gate consistency function.
-    # The inputs to the OR are all of the AND output variables.
-    or_input_vars = range(extra_var_i, extra_var_i + len(productTerms))
-    add_GCF_for_or(CNF, or_input_vars, final_output_var_i)
-    # Add the final clause: the fact that the output variable should be 1/true
-    CNF.append(make_CNF_clause(ones=[final_output_var_i], zeros=[]))
-    return CNF
+    # These are the CNF clauses which represent ~F.
+    return [ clause.negation() for clause in productTerms ]
 
 
 def add_GCF_for_and(toList: list[Clause], term: dict[int, int|None], term_out_var_i: int):
@@ -245,14 +272,14 @@ def add_GCF_for_and(toList: list[Clause], term: dict[int, int|None], term_out_va
             neg.append(x_i) # add xi
         else:
             raise ValueError(f"term variable #{x_i} has invalid value: {val}")
-        toList.append(make_CNF_clause(ones=pos, zeros=neg))
+        toList.append(Clause(pos, neg))
 
     # Add a single CNF clause for the SUMATION part:
     #    [SUM(over i=1 to n, of ~xi) + z]
     pos = [x_i for x_i, val in term.items() if val == NEG_LIT] # add ~xi (invert the var's polarity)
     neg = [x_i for x_i, val in term.items() if val == POS_LIT] # add ~xi (invert the var's polarity)
     pos.append(term_out_var_i) # add z
-    toList.append(make_CNF_clause(ones=pos, zeros=neg))
+    toList.append(Clause(pos, neg))
 
 
 def add_GCF_for_or(toList: list[Clause], or_input_vars, output_var: int):
@@ -271,12 +298,12 @@ def add_GCF_for_or(toList: list[Clause], or_input_vars, output_var: int):
     # Add the multiple CNF clauses for the PRODUCT part:
     #    PRODUCT(over i=1 to n, of (~xi + z))
     for x_i in or_input_vars:
-        toList.append(make_CNF_clause(ones=[output_var], zeros=[x_i]))
+        toList.append(Clause([output_var], [x_i]))
 
     # Add a single CNF clause for the SUMATION part:
     #    [SUM(over i=1 to n, of xi) + ~z]
     # In this part, we invert each literals' polarity between positive/negative
-    toList.append(make_CNF_clause(ones=list(or_input_vars), zeros=[output_var]))
+    toList.append(Clause(list(or_input_vars), [output_var]))
 
 
 def clause_value(clause: Clause, assignments: dict) -> str:
@@ -291,7 +318,7 @@ def clause_value(clause: Clause, assignments: dict) -> str:
     - Return `UNDECIDED` if clause is UNDECIDED
     '''
     # Get the list of literals from the given clause
-    list_of_literals = list(clause.data.keys())
+    list_of_literals = list(clause.variables())
 
     # Keep track of number of literals that evaluate to False
     countFalse = 0
@@ -337,7 +364,7 @@ def find_maximum_literal(clauses: list[Clause]) -> int:
     This is useful for knowing the upper limit of how many variables there are in a boolean function.
     Also useful for finding the output variable index.
     '''
-    return max([max(clause.data.keys()) for clause in clauses])
+    return max([max(clause.variables()) for clause in clauses])
 
 
 def decide_literal(clauses: list[Clause], decisions: dict) -> int|None:
@@ -368,11 +395,11 @@ def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> d
         # If there is a unit clause in the list, assign 0 or 1 to the literal depending on the polarity
         if clauses[i].isUnit == True:
             for lit, val in assignments.items():
-                if (val == None) and (lit in clauses[i].data):
-                    if clauses[i].data[lit] == POS_LIT and assignments[lit] == None: 
+                if (val == None) and (lit in clauses[i].variables()):
+                    if clauses[i].var_polarity(lit) == POS_LIT and assignments[lit] == None: 
                         assignments[lit] = 1 # Only assigning the unassigned literal
                         polarity = POS_LIT # Save the polarity of the literal to determine which complement to remove from the other clauses
-                    elif clauses[i].data[lit] == NEG_LIT and assignments[lit] == None:
+                    elif clauses[i].var_polarity(lit) == NEG_LIT and assignments[lit] == None:
                         assignments[lit] = 0 # Only assigning the unassigned literal
                         polarity =  NEG_LIT # Save the polarity of the literal to determine which complement to remove from the other clauses
                     del clauses[i] # Remove the clause from the list now that it is SAT
@@ -380,18 +407,18 @@ def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> d
                     # Loop over list again to remove the complement of the literal from all clauses
                     for j in range(len(clauses)):
                         # if the literal that just made the unit clause SAT is in this current clause and is ~xi
-                        if  (lit in clauses[j].data) and (polarity == NEG_LIT):
-                            for k, _ in clauses[j].data.items():
+                        if  (clauses[j].contains(lit)) and (polarity == NEG_LIT):
+                            for k, _ in clauses[j].var_polarities().items():
                                 # If literal is the complement of the literal that just made the unit clause SAT...
-                                if (k == lit) and (clauses[j].data[k] == POS_LIT):
-                                    del clauses[j].data[k] # Remove the complement literal
+                                if (k == lit) and (clauses[j].var_polarity(k) == POS_LIT):
+                                    clauses[j].remove(k) # Remove the complement literal
                                     break # Removed complement. No need to iterate further in the clause
                         # if the literal that just made the unit clause SAT is in this current clause and is xi
-                        elif (lit in clauses[j].data) and (polarity == POS_LIT):
-                            for k, _ in clauses[j].data.items():
+                        elif (clauses[j].contains(lit)) and (polarity == POS_LIT):
+                            for k, _ in clauses[j].var_polarities().items():
                                 # If literal is the complement of the literal that just made the unit clause SAT...
-                                if (k == lit) and (clauses[j].data[k] == NEG_LIT):
-                                    del clauses[j].data[k] # Remove the complement literal
+                                if (k == lit) and (clauses[j].var_polarity(k) == NEG_LIT):
+                                    clauses[j].remove(k) # Remove the complement literal
                                     break # Removed complement. No need to iterate further in the clause
                     # Removed clause. No need to further iterate
                     break
@@ -410,16 +437,16 @@ def values_of_literals(clause: Clause, assignments: dict) -> dict[int, int|None]
 
     # Loop through the literals to assign the values of the literal appropriately
     # Set the current_literal to the current index of the literal
-    for current_literal, val in clause.data.items():
+    for current_literal, polarity in clause.var_polarities().items():
 
         # If the literal is negative AND it's assigned as a 1,
         # Assign the complement 0
-        if val == NEG_LIT and assignments[current_literal] == POS_LIT:
+        if polarity == NEG_LIT and assignments[current_literal] == POS_LIT:
             literal_and_assignment[current_literal] = NEG_LIT
 
         # If the literal is negative AND it's assigned as a 0,
         # Assign the complement 1
-        elif val == NEG_LIT and assignments[current_literal] == NEG_LIT:
+        elif polarity == NEG_LIT and assignments[current_literal] == NEG_LIT:
             literal_and_assignment[current_literal] = POS_LIT
     
         # If the literal is positive, keep the current assignment
@@ -586,7 +613,7 @@ def make_blocking_clause(assignments: dict[int,Any]) -> Clause:
     '''
     pos = [xi for xi, v in assignments.items() if v == NEG_LIT] # negated
     neg = [xi for xi, v in assignments.items() if v == POS_LIT] # negated
-    return make_CNF_clause(pos, neg)
+    return Clause(pos, neg)
 
 
 def find_all_SAT(clauses: list[Clause]) -> list[dict[int,None]]:
@@ -632,11 +659,11 @@ def xor_CNF_functions(clauses_a: ClauseList, clauses_b: ClauseList) -> list[Clau
     or_out = next_literal_i + 3 # for the final OR gate output
 
     # Implement AND gate for: ~a.b -> not_a_yes_b_out
-    not_a_yes_b_clause = make_CNF_clause([b_out], [a_out])
+    not_a_yes_b_clause = Clause([b_out], [a_out])
     add_GCF_for_and(clauses_result, not_a_yes_b_clause.data, not_a_yes_b_out)
 
     # Implement AND gate for: a.~b -> yes_a_not_b_out
-    yes_a_not_b_clause = make_CNF_clause([a_out], [b_out])
+    yes_a_not_b_clause = Clause([a_out], [b_out])
     add_GCF_for_and(clauses_result, yes_a_not_b_clause.data, yes_a_not_b_out)
 
     # Implement OR gate for combining the above two AND gates
@@ -670,12 +697,59 @@ def printAssignments(assignments: dict[int,Any]):
     print(", ".join([f"x{i}={v}" for i, v in assignments.items()]))
 
 
+def test_str_CNF():
+    print("Testing Clause.str_CNF()")
+
+    c = Clause([],[])
+    assert(c.str_CNF() == '()')
+    assert(c.str_CNF(False) == '')
+
+    c = Clause([], [], {0})
+    assert(c.str_CNF() == '(0)')
+    assert(c.str_CNF(False) == '0')
+
+    c = Clause([], [], {1})
+    assert(c.str_CNF() == '(1)')
+    assert(c.str_CNF(False) == '1')
+
+    c = Clause([], [], {0, 1})
+    assert(c.str_CNF() == '(0 + 1)')
+    assert(c.str_CNF(False) == '0 . 1')
+
+    c = Clause({1}, [])
+    assert(c.str_CNF() == '(x1)')
+    assert(c.str_CNF(False) == 'x1')
+
+    c = Clause([], {1})
+    assert(c.str_CNF() == '(~x1)')
+    assert(c.str_CNF(False) == '~x1')
+
+    c = Clause({1}, {1})
+    assert(c.str_CNF() == '(x1 + ~x1)')
+    assert(c.str_CNF(False) == 'x1 . ~x1')
+
+    c = Clause({1, 2}, {2, 3})
+    assert(c.str_CNF() == '(x1 + x2 + ~x2 + ~x3)')
+    assert(c.str_CNF(False) == 'x1 . x2 . ~x2 . ~x3')
+
+    c = Clause({1, 2}, {2, 3}, {1})
+    assert(c.str_CNF() == '(1 + x1 + x2 + ~x2 + ~x3)')
+    assert(c.str_CNF(False) == '1 . x1 . x2 . ~x2 . ~x3')
+
+    c = Clause({1, 2}, {2, 3}, {0})
+    assert(c.str_CNF() == '(0 + x1 + x2 + ~x2 + ~x3)')
+    assert(c.str_CNF(False) == '0 . x1 . x2 . ~x2 . ~x3')
+
+    c = Clause({1, 2}, {2, 3}, {1, 0})
+    assert(c.str_CNF() == '(0 + 1 + x1 + x2 + ~x2 + ~x3)')
+    assert(c.str_CNF(False) == '0 . 1 . x1 . x2 . ~x2 . ~x3')
+
 def test_clause_value():
     '''
     Test the clause_value() function
     '''
     # test one positive literal (x1)
-    c = make_CNF_clause([1], [])
+    c = Clause([1], [])
 
     # postive literal is set to 1
     v = clause_value(c, {1:1})
@@ -690,7 +764,7 @@ def test_clause_value():
     assert(v == UNDECIDED)
 
     # Test one negative literal (~x1)
-    c = make_CNF_clause([], [1])
+    c = Clause([], [1])
 
     # assign the literal to 1, which makes the clause false
     v = clause_value(c, {1:1})
@@ -705,7 +779,7 @@ def test_clause_value():
     assert(v == UNDECIDED)
 
     # Test a clause with 2 literals
-    c = make_CNF_clause([1,2], [])
+    c = Clause([1,2], [])
     testPairs2 = [
         ({1:1, 2:1}, SAT),
         ({1:1, 2:0}, SAT),
@@ -727,7 +801,7 @@ def test_clause_value():
 
     # Test a clause with 3 positive literals
     # (not testing all combinations of 0,1, and None)
-    c = make_CNF_clause([1,2,3], [])
+    c = Clause([1,2,3], [])
     testPairs3 = [
         ({1:1, 2:1, 3:1}, SAT),
         ({1:1, 2:1, 3:0}, SAT),
@@ -757,38 +831,38 @@ def test_dpll(dpll_func):
     assert(dpll_func([]) == {})
 
     # Test a single clause with one positive literal (SAT)
-    clauses = [make_CNF_clause([1], [])] # (x1)
+    clauses = [ Clause([1], []) ] # (x1)
     result = dpll_func(clauses)
     assert(result)
     assert(result[1] == 1)
     assert(result == {1:1})
 
     # Test a single clause with one negative literal (SAT)
-    clauses = [make_CNF_clause([], [1])] # (~x1)
+    clauses = [ Clause([], [1]) ] # (~x1)
     result = dpll_func(clauses)
     assert(result)
     assert(result[1] == 0)
     assert(result == {1:0})
 
     # Test conflicting clauses (UNSAT)
-    clauses = [make_CNF_clause([1], []), make_CNF_clause([], [1])] # (x1).(~x1)
+    clauses = [ Clause([1], []), Clause([], [1]) ] # (x1).(~x1)
     result = dpll_func(clauses)
     assert(result == {})
 
     # Test 2 clauses
-    clauses = [make_CNF_clause([1], []), make_CNF_clause([2], [])] # (x1).(x2)
+    clauses = [ Clause([1], []), Clause([2], []) ] # (x1).(x2)
     result = dpll_func(clauses)
     assert(result)
     assert(result == {1: 1, 2: 1})
 
     # Test 2 clauses (one has a positive literal, one is negative literal)
-    clauses = [make_CNF_clause([1], []), make_CNF_clause([], [2])] # (x1).(~x2)
+    clauses = [ Clause([1], []), Clause([], [2]) ] # (x1).(~x2)
     result = dpll_func(clauses)
     assert(result)
     assert(result == {1: 1, 2: 0})
 
     # Test 2 clauses (both negative literals)
-    clauses = [make_CNF_clause([], [1]), make_CNF_clause([], [2])] # (~x1).(~x2)
+    clauses = [ Clause([], [1]), Clause([], [2]) ] # (~x1).(~x2)
     result = dpll_func(clauses)
     assert(result)
     assert(result == {1: 0, 2: 0})
@@ -796,42 +870,150 @@ def test_dpll(dpll_func):
 
 def test_parse_SOP_string():
     print('Testing parse_SOP_string()')
+    
+    a = parse_SOP_string("1")
+    assert(len(a) == 1)
+    c = a[0]
+    assert(1 in c.literals)
+    assert(0 not in c.literals)
+    assert(not c.positives)
+    assert(not c.negatives)
+
+    a = parse_SOP_string("0")
+    assert(len(a) == 1)
+    c = a[0]
+    assert(1 not in c.literals)
+    assert(0 in c.literals)
+    assert(not c.positives)
+    assert(not c.negatives)
+
+    a = parse_SOP_string("1 . 1")
+    assert(len(a) == 1)
+    c = a[0]
+    assert(1 in c.literals)
+    assert(0 not in c.literals)
+    assert(not c.positives)
+    assert(not c.negatives)
+
+    a = parse_SOP_string("1 . 0")
+    assert(len(a) == 1)
+    c = a[0]
+    assert(1 in c.literals)
+    assert(0 in c.literals)
+    assert(not c.positives)
+    assert(not c.negatives)
+
+    a = parse_SOP_string("1 + 0")
+    assert(len(a) == 2)
+    c = a[0]
+    assert(1 in c.literals)
+    assert(0 not in c.literals)
+    assert(not c.positives)
+    assert(not c.negatives)
+    c = a[1]
+    assert(1 not in c.literals)
+    assert(0 in c.literals)
+    assert(not c.positives)
+    assert(not c.negatives)
+
     a = parse_SOP_string("x1")
     assert(len(a) == 1)
-    assert(a[0].data == {1:1})
+    c = a[0]
+    assert(1 in c.positives)
+    assert(not c.literals)
+    assert(not c.negatives)
 
     a = parse_SOP_string("x1 + x2 + x3")
     assert(len(a) == 3)
-    assert(a[0].data == {1:1})
-    assert(a[1].data == {2:1})
-    assert(a[2].data == {3:1})
-
-    a = parse_SOP_string("x1 ~x2")
-    assert(len(a) == 1)
-    assert(a[0].data == {1:1, 2:0})
+    assert(1 in a[0].positives)
+    assert(2 in a[1].positives)
+    assert(3 in a[2].positives)
+    assert(1 not in a[0].negatives)
+    assert(2 not in a[1].negatives)
+    assert(3 not in a[2].negatives)
 
     a = parse_SOP_string("x1 . ~x2")
     assert(len(a) == 1)
-    assert(a[0].data == {1:1, 2:0})
+    assert(1 in a[0].positives)
+    assert(2 not in a[0].positives)
+    assert(1 not in a[0].negatives)
+    assert(2 in a[0].negatives)
+
+    a = parse_SOP_string("~x1 . x2")
+    assert(len(a) == 1)
+    assert(1 not in a[0].positives)
+    assert(2 in a[0].positives)
+    assert(1 in a[0].negatives)
+    assert(2 not in a[0].negatives)
 
     a = parse_SOP_string("~x1 . ~x2")
     assert(len(a) == 1)
-    assert(a[0].data == {1:0, 2:0})
+    assert(1 not in a[0].positives)
+    assert(2 not in a[0].positives)
+    assert(1 in a[0].negatives)
+    assert(2 in a[0].negatives)
+
+    a = parse_SOP_string("~x1 . x1 . x1")
+    assert(len(a) == 1)
+    assert(1 in a[0].negatives)
+    assert(1 in a[0].positives)
 
 
-def test_convert_SOP_to_CNF():
-    print('Testing convert_SOP_to_CNF()')
-    print('[not implemented yet]')
-    pass
+def test_convert_SOP_to_CNF_neg():
+    print('Testing convert_SOP_to_CNF_neg()')
+    
+    # try single-variable SOP clauses of "x1" up to "x100"
+    for xi in range(1, 100):
+        # positive clauses
+        sop = [ Clause([xi], []) ] # "xi"
+        cnf = convert_SOP_to_CNF_neg(sop)
+        assert(cnf[0].variables() == {xi})
+        assert(cnf[0].var_polarity(xi) == NEG_LIT)
+
+        # negative clauses
+        sop = [ Clause([], [xi]) ] # "xi"
+        cnf = convert_SOP_to_CNF_neg(sop)
+        assert(cnf[0].variables() == {xi})
+        assert(cnf[0].var_polarity(xi) == POS_LIT)
+
+    # try a single SOP clause with 2 variables
+    sop = [ Clause([1, 2], []) ] # "x1 . x2"
+    cnf = convert_SOP_to_CNF_neg(sop) # should be "(x1)(x2)"
+    assert(len(cnf) == 1)
+    assert(cnf[0].variables() == {1, 2})
+    assert(cnf[0].var_polarity(1) == NEG_LIT)
+    assert(cnf[0].var_polarity(2) == NEG_LIT)
+
+    # try a single SOP clause with 2 variables
+    sop = [ Clause([1], [2]) ] # "x1 . ~x2"
+    cnf = convert_SOP_to_CNF_neg(sop) # should be "(x1)(~x2)"
+    assert(len(cnf) == 1)
+    assert(cnf[0].variables() == {1, 2})
+    assert(cnf[0].var_polarity(1) == NEG_LIT)
+    assert(cnf[0].var_polarity(2) == POS_LIT)
+
+    # try a single SOP clause with conflicting variables
+    sop = [ Clause([99], [99]) ] # "xi . ~xi"
+    cnf = convert_SOP_to_CNF_neg(sop) # should be "(xi . ~x1)""
+    assert(cnf[0].variables() == {99})
+    assert(cnf[0].var_polarity(99) == 'BOTH')
+
+    # convert 2 clauses each with 2 vars
+    sop = [ Clause({1}, {2}), Clause({2}, {1})] # "x1 . ~x2 + ~x1 . x2"
+    cnf = convert_SOP_to_CNF_neg(sop) # should be "(~x1 + x2).(x1 + ~x2)"
+    assert(cnf[0].var_polarities() == {1: NEG_LIT, 2: POS_LIT})
+    assert(cnf[1].var_polarities() == {1: POS_LIT, 2: NEG_LIT})
 
 
 def test_SAT_cnf():
+    '''Test all functions in this file (SAT_cnf.py).'''
     print("Testing SAT_cnf.py")
+    test_str_CNF()
+    test_parse_SOP_string()
+    test_convert_SOP_to_CNF_neg()
     test_clause_value()
     test_dpll(dpll_rec)
     test_dpll(dpll_iterative)
-    test_parse_SOP_string()
-    test_convert_SOP_to_CNF()
     print('All tests passed!')
 
 
@@ -846,7 +1028,7 @@ def print_clauses_as_DIMACS(clauses: list[Clause]):
     # Print each clause
     for clause in clauses:
         # Get the list of literals in the clause
-        literals = clause.sortedVars()
+        literals = sorted(clause.var_polarities().items())
         # Print the literals in the clause
         for var_i, value in literals:
             if value == POS_LIT:
@@ -874,7 +1056,7 @@ def parse_DIMACS_clause(line: str) -> Clause:
             neg.add(-xi)
         elif xi > 0:
             pos.add(xi)
-    return make_CNF_clause(pos, neg)
+    return Clause(pos, neg)
     
 
 def read_DIMACS_file(file_path: str) -> list[Clause]:
@@ -927,9 +1109,9 @@ def read_sop_file(file_path: str) -> list[Clause]:
         print('Parsing SOP input:', function)
         # Parse the string input
         sop = parse_SOP_string(function)
-        print('Parsed result:', '+'.join([x.__str__(isCNF=False) for x in sop]))
+        print('Parsed result:', '+'.join([x.str_CNF(is_CNF=False) for x in sop]))
         # Convert the string to CNF form
-        cnf = convert_SOP_to_CNF(sop)
+        cnf = convert_SOP_to_CNF_neg(sop)
         # Print the CNF clause list
         print('Converting to CNF, clauses are:')
         print(".".join([str(c) for c in cnf])) # print clause list
@@ -956,11 +1138,11 @@ def read_sop_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
         print('Parsing SOP input:', function1)
         # Parse the string input
         sop1 = parse_SOP_string(function1)
-        print('Parsed result:', '+'.join([x.__str__(isCNF=False) for x in sop1]))
+        print('Parsed result:', '+'.join([x.str_CNF(is_CNF=False) for x in sop1]))
         print('Parsing SOP input:', function2)
         # Parse the string input
         sop2 = parse_SOP_string(function2)
-        print('Parsed result:', '+'.join([x.__str__(isCNF=False) for x in sop2]))
+        print('Parsed result:', '+'.join([x.str_CNF(is_CNF=False) for x in sop2]))
         # Create a ClauseList object to convert the SoP function to CNF.
         # Object members contain CNF form function and other attributes
         cnf1 = ClauseList(function1)
@@ -1068,4 +1250,5 @@ def main():
         return
 
 if __name__ == "__main__":
-    main()
+    test_SAT_cnf()
+    #main()
