@@ -313,32 +313,56 @@ def parse_SOP_string(text: str) -> list[Clause]: # list of product terms, not CN
     return clauses
 
 
-def convert_SOP_to_CNF_neg(product_terms: list[Clause]) -> list[Clause]:
-    '''
-    Convert a list of SOP clauses representing a boolean function, F,
-    (like from the result of parse_SOP_string) to a list of CNF clauses that represent ~F.
-    '''
-    # These are the CNF clauses which represent ~F.
-    return [ clause.negation() for clause in product_terms ]
-
-
 def convert_SOP_to_CNF(product_terms: list[Clause]) -> list[Clause]:
     '''
     Convert a list of SOP clauses representing a boolean function, F,
     (like from the result of parse_SOP_string) to a list of CNF clauses that represent F.
     '''
-    raise NotImplementedError()
+    result: list[Clause] = []
+    if len(product_terms) == 1:
+        # Expand out into 1-variable CNF clauses
+        term = product_terms[0]
+        for x_i, polarity in term.var_polarities().items():
+            if polarity == POS_LIT:
+                result.append(Clause({x_i}, []))
+            elif polarity == NEG_LIT:
+                result.append(Clause([], {x_i}))
+            else:
+                raise ValueError(f"'and' input variable #{x_i} has invalid polarity: {polarity}")
+        return result
+    else:
+        xi = find_max_var(product_terms) + 1
+        or_first_in_i = xi
+        # Keep track of the inputs to the OR gate, and their polarities.
+        or_inputs: dict[int, int] = {}
+        # Create AND gates for each product term
+        for term in product_terms:
+            num_vars = len(term.vars())
+            if num_vars > 1:
+                # Create AND gate for this product term
+                add_GCF_for_and(result, term.var_polarities(), xi)
+                or_inputs[xi] = POS_LIT
+                xi += 1
+            elif num_vars == 1:
+                # (Shortcut) Wire directly to the big OR GCF later
+                var, polarity = tuple(term.var_polarities().items())[0]
+                assert(polarity == POS_LIT or polarity == NEG_LIT)
+                or_inputs[var] = int(polarity)
+        # Combine into one big OR gate
+        add_GCF_for_or(result, or_inputs, xi)
+        # Output should be true
+        result.append(Clause({xi}, []))
+        return result
 
 
-def add_GCF_for_and(toList: list[Clause], term: dict[int, int|None], term_out_var_i: int):
+
+def add_GCF_for_and(to_list: list[Clause], input_vars: dict[int, int], term_output_var: int):
     '''
     Helper function for convert_SOP_to_CNF().
     (GCF stands for Gate Consistency Function.)
 
     Given a product term (from SOP form), and it's output variable,
     add all of it's required CNF clauses to the `toList` as determined by the AND gate consistency function (GCF).
-
-    [Izak is responsible for this function.]
     '''
     # Each term is a product (AND gate)
     # and the consistency function for this creates multiple CNF clauses:
@@ -347,52 +371,68 @@ def add_GCF_for_and(toList: list[Clause], term: dict[int, int|None], term_out_va
 
     # Add the multiple CNF clauses for the PRODUCT part:
     #    [PRODUCT(over i=1 to n, of xi + ~z)]
-    for x_i, val in term.items():
-        pos = []
-        neg = [term_out_var_i] # add ~z
-        if val == POS_LIT:
-            # `var_i` is a positive literal in the product term
-            pos.append(x_i) # add xi
-        elif val == NEG_LIT:
-            # `var_i` is a negative literal in the product term
-            neg.append(x_i) # add xi
+    for x_i, polarity in input_vars.items():
+        # Keep polarity of x_i and always add ~z
+        if polarity == POS_LIT:
+            # `x_i` is a positive literal in the product term
+            to_list.append(Clause([x_i], [term_output_var])) # add xi and ~z
+        elif polarity == NEG_LIT:
+            # `x_i` is a negative literal in the product term
+            to_list.append(Clause([], [x_i, term_output_var])) # add ~xi and ~z
         else:
-            raise ValueError(f"term variable #{x_i} has invalid value: {val}")
-        toList.append(Clause(pos, neg))
+            raise ValueError(f"'and' input variable #{x_i} has invalid polarity: {polarity}")
 
-    # Add a single CNF clause for the SUMATION part:
+    # Add a single CNF clause for the SUMATION part (invert original vars and introduce the output variable `z`):
     #    [SUM(over i=1 to n, of ~xi) + z]
-    pos = [x_i for x_i, val in term.items() if val == NEG_LIT] # add ~xi (invert the var's polarity)
-    neg = [x_i for x_i, val in term.items() if val == POS_LIT] # add ~xi (invert the var's polarity)
-    pos.append(term_out_var_i) # add z
-    toList.append(Clause(pos, neg))
+    summation_clause = Clause({term_output_var}, []) # add z
+    for x_i, polarity in input_vars.items():
+        # Invert polarity of x_i
+        if polarity == POS_LIT:
+            summation_clause.negatives.add(x_i)
+        elif polarity == NEG_LIT:
+            summation_clause.positives.add(x_i)
+        else:
+            raise ValueError(f"'and' input variable #{x_i} has invalid polarity: {polarity}")
+    to_list.append(summation_clause)
 
 
-def add_GCF_for_or(toList: list[Clause], or_input_vars, output_var: int):
+def add_GCF_for_or(to_list: list[Clause], input_vars: dict[int, int], output_var: int):
     '''
     Helper function for convert_SOP_to_CNF().
     (GCF stands for Gate Consistency Function.)
 
     Create the consistency function for the OR gate that occurs in SOP form.
-    All the input variables are positive, which is why this function is simpler than `add_and_GCF()`.
-
-    [Izak is responsible for this function.]
     '''
     # For and OR gate z = OR(x1, x2, ... xn):
     #    [PRODUCT(over i=1 to n, of (~xi + z))] * [SUM(over i=1 to n, of xi) + ~z]
 
     # Add the multiple CNF clauses for the PRODUCT part:
     #    PRODUCT(over i=1 to n, of (~xi + z))
-    for x_i in or_input_vars:
-        toList.append(Clause([output_var], [x_i]))
+    for x_i, polarity in input_vars.items():
+        if polarity == POS_LIT:
+            # invert positive `x_i` to negative
+            to_list.append(Clause({output_var}, {x_i})) # add ~xi and z
+        elif polarity == NEG_LIT:
+            # invert negative `x_i` to positive
+            to_list.append(Clause({x_i, output_var}, [])) # add ~xi and z
+        else:
+            raise ValueError(f"'or' input variable #{x_i} has invalid polarity: {polarity}")
 
     # Add a single CNF clause for the SUMATION part:
     #    [SUM(over i=1 to n, of xi) + ~z]
-    # In this part, we invert each literals' polarity between positive/negative
-    toList.append(Clause(list(or_input_vars), [output_var]))
+    summation_clause = Clause([], {output_var}) # add ~z
+    for x_i, polarity in input_vars.items():
+        # Keep polarity of x_i
+        if polarity == POS_LIT:
+            summation_clause.positives.add(x_i)
+        elif polarity == NEG_LIT:
+            summation_clause.negatives.add(x_i)
+        else:
+            raise ValueError(f"'or' input variable #{x_i} has invalid polarity: {polarity}")
+    to_list.append(summation_clause)
 
 
-def find_maximum_literal(clauses: list[Clause]) -> int:
+def find_max_var(clauses: list[Clause]) -> int:
     '''
     Find the maximum variable index in a list of CNF clauses.
     This is useful for knowing the upper limit of how many variables there are in a boolean function.
@@ -653,8 +693,8 @@ def xor_CNF_functions(clauses_a: ClauseList, clauses_b: ClauseList) -> list[Clau
 
     # Get the output literals from the functions, so we can use them as
     # inputs for the GCFs
-    a_out = find_maximum_literal(clauses_a.cnf_clauses)
-    b_out = find_maximum_literal(clauses_b.cnf_clauses)
+    a_out = find_max_var(clauses_a.cnf_clauses)
+    b_out = find_max_var(clauses_b.cnf_clauses)
 
     # Get the next variable index that would come after those, so we can
     # introduce new variables to implement GCFs.
@@ -986,50 +1026,50 @@ def test_parse_SOP_string():
     assert(1 in a[0].positives)
 
 
-def test_convert_SOP_to_CNF_neg():
-    print('Testing convert_SOP_to_CNF_neg()')
+def test_convert_SOP_to_CNF():
+    print('Testing convert_SOP_to_CNF()')
     
     # try single-variable SOP clauses of "x1" up to "x100"
     for xi in range(1, 100):
         # positive clauses
         sop = [ Clause([xi], []) ] # "xi"
-        cnf = convert_SOP_to_CNF_neg(sop)
-        assert(cnf[0].vars() == {xi})
-        assert(cnf[0].var_polarity(xi) == NEG_LIT)
-
-        # negative clauses
-        sop = [ Clause([], [xi]) ] # "xi"
-        cnf = convert_SOP_to_CNF_neg(sop)
+        cnf = convert_SOP_to_CNF(sop) # "(xi)"
         assert(cnf[0].vars() == {xi})
         assert(cnf[0].var_polarity(xi) == POS_LIT)
 
+        # negative clauses
+        sop = [ Clause([], [xi]) ] # "~xi"
+        cnf = convert_SOP_to_CNF(sop) # "(~xi)"
+        assert(cnf[0].vars() == {xi})
+        assert(cnf[0].var_polarity(xi) == NEG_LIT)
+
     # try a single SOP clause with 2 variables
     sop = [ Clause([1, 2], []) ] # "x1 . x2"
-    cnf = convert_SOP_to_CNF_neg(sop) # should be "(x1)(x2)"
-    assert(len(cnf) == 1)
-    assert(cnf[0].vars() == {1, 2})
-    assert(cnf[0].var_polarity(1) == NEG_LIT)
-    assert(cnf[0].var_polarity(2) == NEG_LIT)
+    cnf = convert_SOP_to_CNF(sop) # should be "(x1)(x2)"
+    assert(len(cnf) == 2)
+    assert(cnf[0].vars() == {1})
+    assert(cnf[0].var_polarity(1) == POS_LIT)
+    assert(cnf[1].vars() == {2})
+    assert(cnf[1].var_polarity(2) == POS_LIT)
 
     # try a single SOP clause with 2 variables
     sop = [ Clause([1], [2]) ] # "x1 . ~x2"
-    cnf = convert_SOP_to_CNF_neg(sop) # should be "(x1)(~x2)"
-    assert(len(cnf) == 1)
-    assert(cnf[0].vars() == {1, 2})
-    assert(cnf[0].var_polarity(1) == NEG_LIT)
-    assert(cnf[0].var_polarity(2) == POS_LIT)
+    cnf = convert_SOP_to_CNF(sop) # should be "(x1)(~x2)"
+    assert(len(cnf) == 2)
+    assert(cnf[0].vars() == {1})
+    assert(cnf[0].var_polarity(1) == POS_LIT)
+    assert(cnf[1].var_polarity(2) == NEG_LIT)
 
     # try a single SOP clause with conflicting variables
-    sop = [ Clause([99], [99]) ] # "xi . ~xi"
-    cnf = convert_SOP_to_CNF_neg(sop) # should be "(xi . ~x1)""
-    assert(cnf[0].vars() == {99})
-    assert(cnf[0].var_polarity(99) == 'BOTH')
-
-    # convert 2 clauses each with 2 vars
-    sop = [ Clause({1}, {2}), Clause({2}, {1})] # "x1 . ~x2 + ~x1 . x2"
-    cnf = convert_SOP_to_CNF_neg(sop) # should be "(~x1 + x2).(x1 + ~x2)"
-    assert(cnf[0].var_polarities() == {1: NEG_LIT, 2: POS_LIT})
-    assert(cnf[1].var_polarities() == {1: POS_LIT, 2: NEG_LIT})
+    error = False
+    try:
+        sop = [ Clause([99], [99]) ] # "xi . ~xi"
+        cnf = convert_SOP_to_CNF(sop) # should be "(xi . ~x1)""
+        assert(cnf[0].vars() == {99})
+        assert(cnf[0].var_polarity(99) == 'BOTH')
+    except ValueError:
+        error = True
+    assert(error)
 
 
 def test_SAT_cnf():
