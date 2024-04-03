@@ -203,38 +203,6 @@ class Clause(object):
         return (self.value_given(assignments), self.undecided_given(assignments)) 
 
 
-class ClauseList:
-    '''
-    Class to track:
-    - The list of clauses in a given function.
-    - The last variable index from SOP form.
-    - The maximum variable index from CNF.
-    '''
-    def __init__(self, sop_input: str):
-        # Store SOP clauses in this member
-        self.sop_clauses = parse_DNF_string(sop_input)
-        # Store CNF clauses in this member
-        self.cnf_clauses = convert_DNF_to_CNF(self.sop_clauses)
-        # Store the max variable from the SOP function input in this member
-        self.input_max = find_clauses_highest_var(self.sop_clauses)
-
-        # Keep a count of the index where the max input variable 
-        # in SoP form is and store in this member
-        self.max_index_sop = 0
-        for i in self.sop_clauses:
-            # Get the max variable index in the list of keys from the clause
-            if max(list(i.vars())) == self.input_max:
-                break
-            else:
-                self.max_index_sop += 1
-
-        # Store the CNF output variable index in this member
-        self.max_cnf_index = len(self.cnf_clauses) - 1
-        
-    def printClauseList(self):
-        print(self.sop_clauses)
-
-
 def literal_val_negation(x):
     '''
     Negate POS_LIT and NEG_LIT, otherwise keep the value.
@@ -1153,7 +1121,7 @@ def read_DNF_file(file_path: str) -> tuple[list[Clause], set[int]]:
         return cnf, original_vars
 
 
-def read_DNF_file_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
+def read_DNF_file_xor(file_path: str) -> tuple[list[Clause], list[Clause]]:
     '''
     Function to read the plain text SoP functions. Should only be used for XOR operation
     Requires two functions in the plain text file. They will be XOR'd together
@@ -1170,24 +1138,14 @@ def read_DNF_file_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
         function1 = file.readline()
         # Read second line of the file. This should be the function in SoP form
         function2 = file.readlines()[0]
-        print('Parsing SOP input:', function1)
         # Parse the string input
         sop1 = parse_DNF_string(function1)
-        print('Parsed result:', '+'.join([x.str_DNF() for x in sop1]))
-        print('Parsing SOP input:', function2)
-        # Parse the string input
         sop2 = parse_DNF_string(function2)
-        print('Parsed result:', '+'.join([x.str_DNF() for x in sop2]))
         # Create a ClauseList object to convert the SoP function to CNF.
         # Object members contain CNF form function and other attributes
-        cnf1 = ClauseList(function1)
-        cnf2 = ClauseList(function2)
-        # Print the CNF clause list
-        print('Converting to CNF for function 1, clauses are:')
-        print(".".join([str(c) for c in cnf1.cnf_clauses]))
-        print('Converting to CNF for function 2, clauses are:')
-        print(".".join([str(c) for c in cnf2.cnf_clauses]))
-    return cnf1, cnf2
+        cnf1 = convert_DNF_to_CNF(sop1)
+        cnf2 = convert_DNF_to_CNF(sop2)
+        return cnf1, cnf2
 
 
 def DNF_to_string(dnf_clauses: Iterable[Clause]) -> str:
