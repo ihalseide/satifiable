@@ -230,7 +230,7 @@ def clauses_all_vars(clauses:list[Clause]) -> set[int]:
     return result
 
 
-def parse_SOP_string(text: str) -> list[Clause]: # not CNF clauses!
+def parse_SOP_string(text: str) -> list[Clause]: # list of product terms, not CNF clauses!
     '''
     Parses a Sum-of-Products boolean function string.
 
@@ -289,15 +289,21 @@ def parse_SOP_string(text: str) -> list[Clause]: # not CNF clauses!
     return clauses
 
 
-def convert_SOP_to_CNF_neg(productTerms: list[Clause]) -> list[Clause]:
+def convert_SOP_to_CNF_neg(product_terms: list[Clause]) -> list[Clause]:
     '''
     Convert a list of SOP clauses representing a boolean function, F,
     (like from the result of parse_SOP_string) to a list of CNF clauses that represent ~F.
-
-    NOTE: there is no regular `convert_SOP_to_CNF` (non-negated) function, because that is also a NP-Hard problem!.
     '''
     # These are the CNF clauses which represent ~F.
-    return [ clause.negation() for clause in productTerms ]
+    return [ clause.negation() for clause in product_terms ]
+
+
+def convert_SOP_to_CNF(product_terms: list[Clause]) -> list[Clause]:
+    '''
+    Convert a list of SOP clauses representing a boolean function, F,
+    (like from the result of parse_SOP_string) to a list of CNF clauses that represent F.
+    '''
+    raise NotImplementedError()
 
 
 def add_GCF_for_and(toList: list[Clause], term: dict[int, int|None], term_out_var_i: int):
@@ -567,14 +573,13 @@ def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = N
                 # NOTE: there are no new assignments to push, so this case is where the stack size will shrink.
                 continue # UNSAT
             else:
-                # Try assignment where xi = randomly 0 or 1
-                # (We don't need to make a copy of the current_assignments dictionary,
-                #   because it is not used again after this loop iteration.)
-                value1: int = random.choice((0, 1))
-                value2: int = 1 - value1 # inverts value1
+                # Add the assignment where, first, xi = randomly 0 or 1.
+                # (We don't need to make a copy of the `current_assignments` dictionary, because it is not used again after this loop iteration.)
+                value1 = random.choice((0, 1))
+                value2 = 1 - value1 # inverts value1
                 current_assignments[xi] = value1
                 stack.append(current_assignments)
-                # Try assignment where xi = the opposite of the other choice
+                # Then add the assignment where xi = the opposite of the first choice.
                 # (Make a copy of the dictionary this time, because we need to make a different decision.)
                 assignments2 = current_assignments.copy()
                 assignments2[xi] = value2
