@@ -558,27 +558,27 @@ def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = N
             # then all clauses are SAT and the whole function is SAT!
             return current_assignments # SAT
         else:
-            # At this point, at least one of the clauses is undecided,
+            # At least one of the clauses is undecided,
             # So lets add two decisions to the stack to try next...
             xi = decide_literal(var_set, current_assignments)
             if xi is None:
                 # There are no undecided literals, so we can't make any more decisions.
                 # This means that the function is UNSAT.
                 # NOTE: there are no new assignments to push, so this case is where the stack size will shrink.
-                return {} # UNSAT
-            
-            # Try assignment where xi = randomly 0 or 1
-            # (We don't need to make a copy of the current_assignments dictionary,
-            #   because it is not used again after this loop iteration.)
-            value1: int = random.choice((0, 1))
-            value2: int = 1 - value1 # inverts value1
-            current_assignments[xi] = value1
-            stack.append(current_assignments)
-            # Try assignment where xi = the opposite of the other choice
-            # (Make a copy of the dictionary this time, because we need to make a different decision.)
-            assignments2 = current_assignments.copy()
-            assignments2[xi] = value2
-            stack.append(assignments2)
+                continue # UNSAT
+            else:
+                # Try assignment where xi = randomly 0 or 1
+                # (We don't need to make a copy of the current_assignments dictionary,
+                #   because it is not used again after this loop iteration.)
+                value1: int = random.choice((0, 1))
+                value2: int = 1 - value1 # inverts value1
+                current_assignments[xi] = value1
+                stack.append(current_assignments)
+                # Try assignment where xi = the opposite of the other choice
+                # (Make a copy of the dictionary this time, because we need to make a different decision.)
+                assignments2 = current_assignments.copy()
+                assignments2[xi] = value2
+                stack.append(assignments2)
 
     # UNSAT due to no more possible assignments on the stack.
     return {} # UNSAT
