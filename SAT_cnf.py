@@ -1,7 +1,8 @@
 import re
-from typing import Any
+from typing import Any, Iterable
 import random
 import argparse
+import copy
 from sys import stderr, argv, exit
 
 
@@ -24,7 +25,7 @@ UNSAT = 'UNSAT'
 UNDECIDED = 'UNDECIDED'
 
 
-class Clause:
+class Clause(object):
     '''
     Clause class, which represents a clause in (CNF) Conjunctive Normal Form
     (although it is sometimes used as a convenient container for SOP terms).
@@ -34,7 +35,7 @@ class Clause:
     the value of ~F UNSAT, which makes F be SAT.
     '''
 
-    def __init__(self, positives:set[int]|list[int], negatives:set[int]|list[int], literals:set[int]|list[int]=set()):
+    def __init__(self, positives: Iterable[int] | None = None, negatives: Iterable[int] | None = None, literals: Iterable[int]|None = None):
         '''
         Creating a new Clause, arguments:
         - `positives` = set of variables which are positive (like x1, x2, x99)
@@ -47,47 +48,55 @@ class Clause:
         - `Clause([], [6])` represents the CNF clause: "(~x6)"
         - `Clause([], [])` represents an (empty) CNF clause: "()"
         '''
-        self.positives: set[int] = set(positives)
-        self.negatives: set[int] = set(negatives)
-        self.literals: set[int] = set(literals)
-        #self.isUnit = False
+        self.positives: frozenset[int] = frozenset() if positives is None else frozenset(positives) 
+        self.negatives: frozenset[int] = frozenset() if negatives is None else frozenset(negatives) 
+        self.literals: frozenset[int] = frozenset() if literals is None else frozenset(literals) 
 
 
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Clause):
-            return NotImplemented
-        return (self.positives == other.positives) and (self.negatives == other.negatives) and (self.literals == other.literals)
+    def __key(self) -> tuple:
+        return (self.positives, self.negatives, self.literals)
 
 
-    def __str__(self) -> str:
-        return f"Clause(positives={self.positives}, negatives={self.negatives}, literals={self.literals})"
+    def __hash__(self):
+        '''
+        This method is implemented so we can put `Clause`s in a `set`.
+        Reference: [https://stackoverflow.com/questions/2909106/whats-a-correct-and-good-way-to-implement-hash]
+        '''
+        return hash(self.__key())
+
+
+    def __eq__(self, other):
+        if isinstance(other, Clause):
+            return self.__key() == other.__key()
+        return NotImplemented
 
 
     def __repr__(self) -> str:
-        return self.__str__()
+        p = sorted(tuple(self.positives))
+        n = sorted(tuple(self.negatives))
+        l = sorted(tuple(self.literals))
+        return f"Clause(positives={p}, negatives={n}, literals={l})"
 
 
-    def remove_var(self, xi: int):
-        '''Remove a variable from the clause.'''
-        try: self.positives.remove(xi)
-        except KeyError: pass
-
-        try: self.negatives.remove(xi)
-        except KeyError: pass
+    def without_vars(self, xis: Iterable[int]) -> 'Clause':
+        '''Create a new `Clause` that has the given variables removed.'''
+        positives = self.positives.difference(set(xis))
+        negatives = self.negatives.difference(set(xis))
+        return Clause(positives, negatives, self.literals)
 
 
-    def contains(self, xi: int) -> bool:
+    def has_var(self, xi: int) -> bool:
         '''
-        Returns True only if this Clause contains the given variable (index).
+        Returns True only if this Clause contains the given variable.
         '''
         return (xi in self.positives) or (xi in self.negatives)
     
 
-    def vars(self) -> set[int]:
+    def vars(self) -> frozenset[int]:
         '''
         Get the set of all variables in this clause.
         '''
-        return set.union(self.positives, self.negatives)
+        return self.positives.union(self.negatives)
     
 
     def var_polarities(self) -> dict[int, int|str|None]:
@@ -97,7 +106,7 @@ class Clause:
         return { i: self.var_polarity(i) for i in self.vars() }
 
 
-    def var_polarity(self, xi:int) -> int|str|None:
+    def var_polarity(self, xi: int) -> int|str|None:
         '''
         Get the polarity of a given variable number `xi` within this clause.
         '''
@@ -117,7 +126,8 @@ class Clause:
         '''
         Return the (new instance) negation of this clause.
         '''
-        return Clause(self.negatives.copy(), self.positives.copy(), self.literals.copy())
+        # Switch the negatives and positives
+        return Clause(self.negatives, self.positives, self.literals.copy())
     
 
     def str_SOP(self) -> str:
@@ -146,13 +156,20 @@ class Clause:
         return " + ".join(string_literals)
             
         
-    def undecided_vars(self, assignments: dict[int, int]) -> set[int]:
+    def undecided_vars(self, assignments: dict[int, int]) -> frozenset[int]:
         '''
         Return the set of undecided variables within this clause given the specific assignments so far.
         '''
-        assigned = set(assignments.keys())
-        return self.vars().difference(assigned)
-        
+        return self.vars().difference(assignments.keys())
+    
+
+    def status_cnf(self, assignments: dict[int,int]) -> tuple[str, frozenset[int]]:
+        '''
+        Returns the "status" of this `Clause` given the `assignments`.
+        The status returned is a tuple of: (the clause's value, and the set of the clause's undecided variables).
+        '''
+        return (self.value_cnf(assignments), self.undecided_vars(assignments)) 
+
 
     def value_cnf(self, assignments: dict[int,int]) -> str:
         '''
