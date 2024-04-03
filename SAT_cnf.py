@@ -30,6 +30,7 @@ group2.add_argument('-d', '--dimacs', required=False, type=str, help="DIMACS fil
 mutual2.add_argument('-m', '--all-dimacs', required=False, help="Find all solutions for function in DIMACS form", action='store_true')
 mutual2.add_argument('-s', '--one-dimacs', required=False, help="Find one solution for function in DIMACS form", action='store_true')
 
+
 class Clause:
     '''
     Clause class, which represents a clause in (CNF) Conjunctive Normal Form.
@@ -130,7 +131,7 @@ class Clause:
                 string_literals.append(f"~x{i}")
 
         if is_CNF:
-            return "(" + (" + ".join(string_literals)) + ")"
+            return " + ".join(string_literals)
         else:
             return " . ".join(string_literals)
         
@@ -170,10 +171,6 @@ class Clause:
             return UNDECIDED
         else:
             return UNSAT
-
-    def neg_value_cnf(self, assignments: dict[int,int]) -> str:
-        '''Return the negated/inverted value this CNF clause has given the assignments.'''
-        return sat_val_negation(self.value_cnf(assignments))
 
 
 class ClauseList:
@@ -250,6 +247,8 @@ def parse_SOP_string(text: str) -> list[Clause]: # not CNF clauses!
         parse strings that are not exactly in the right syntax, such as with double
         negatives, multiple dots, extra letters, etc.
     '''
+    if not text:
+        raise ValueError("empty SOP string")
     # Make sure only this subset of characters is in the input string
     if not re.match(r"^([ \r\n.~+x0-9])+$", text, flags=re.IGNORECASE):
         raise ValueError("text string has forbidden characters for SOP form")
@@ -494,13 +493,15 @@ def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, v
 
 def dpll_rec_neg(clauses: list[Clause], var_set: set[int]) -> dict[int, int]:
     '''
-    Does a DPLL SAT recursive search on the list of clauses for a boolean function,
-    but with the meanings of SAT/UNSAT inverated/negated.
+    Does a DPLL SAT search on the list of clauses for a boolean function, but with the function negated.
+    This means:
+    - a result of SAT means that an assignment was found that sets the function to 0
+    - a result of UNSAT means that no assignment was found that sets the function to 0
     '''
     raise NotImplementedError()
 
 
-def dpll_iterative(clauses:list[Clause], var_set:set[int]|None=None) -> dict[int,Any]:
+def dpll_iterative(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int]|None=None) -> dict[int, int]:
     '''
     Implementation of DPLL using a loop instead of recursion.
     '''
@@ -508,16 +509,21 @@ def dpll_iterative(clauses:list[Clause], var_set:set[int]|None=None) -> dict[int
     #global original_clauses
     # Make a copy of the clauses to use to evaluate the clauses
     #original_clauses = deepcopy(clauses)
+
     if not clauses:
         # Edge case where clauses is empty.
         # It's not possible to make any decisions/assignments, so return empty dictionary,
         # which is considered UNSAT.
         return {}
-    if var_set is None:
-        # By default work with all variables that are present in the clauses.
-        var_set = clauses_all_vars(clauses) 
-    assignments1: dict[int,int] = {} # all variables are unassigned
-    assignments2: dict[int,int] = {} # all variables are unassigned
+    
+    # By default work with all variables that are present in the clauses.
+    var_set = clauses_all_vars(clauses) if var_set is None else var_set
+
+    # By default, assignments are empty (vars are all unassigned).
+    assignments1: dict[int, int] = dict() if assignments is None else assignments
+    assignments2: dict[int,int] = assignments1.copy()
+
+    # Start the stack of assigments to try
     starting_xi = decide_literal(var_set, assignments1)
     assert(starting_xi)
     assignments1[starting_xi] = 1
@@ -525,6 +531,7 @@ def dpll_iterative(clauses:list[Clause], var_set:set[int]|None=None) -> dict[int
     stack = []
     stack.append(assignments1)
     stack.append(assignments2)
+
     while stack:
         current_assignments = stack.pop()
         anyUndecidedClause: bool = False
@@ -557,25 +564,32 @@ def dpll_iterative(clauses:list[Clause], var_set:set[int]|None=None) -> dict[int
             if xi is None:
                 # There are no undecided literals, so we can't make any more decisions.
                 # This means that the function is UNSAT.
+                # NOTE: there are no new assignments to push, so this case is where the stack size will shrink.
                 return {} # UNSAT
-            # Try xi=1
+            
+            # Try assignment where xi = randomly 0 or 1
             # (We don't need to make a copy of the current_assignments dictionary,
             #   because it is not used again after this loop iteration.)
-            current_assignments[xi] = 1
+            value1: int = random.choice((0, 1))
+            value2: int = 1 - value1 # inverts value1
+            current_assignments[xi] = value1
             stack.append(current_assignments)
-            # Try xi=0
+            # Try assignment where xi = the opposite of the other choice
             # (Make a copy of the dictionary this time, because we need to make a different decision.)
             assignments2 = current_assignments.copy()
-            assignments2[xi] = 0
+            assignments2[xi] = value2
             stack.append(assignments2)
-    # UNSAT due to no more possible assignments on the stack
+
+    # UNSAT due to no more possible assignments on the stack.
     return {} # UNSAT
 
 
-def dpll_iterative_neg(clauses: list[Clause], var_set: set[int]) -> dict[int, int]:
+def dpll_iterative_neg(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int]|None=None) -> dict[int, int]:
     '''
-    Does a DPLL SAT search on the list of clauses for a boolean function,
-    but with the meanings of SAT/UNSAT inverated/negated.
+    Does a DPLL SAT search on the list of clauses for a boolean function, but with the function negated.
+    This means:
+    - a result of SAT means that an assignment was found that sets the function to 0
+    - a result of UNSAT means that no assignment was found that sets the function to 0
     '''
     raise NotImplementedError()
 
@@ -590,11 +604,11 @@ def make_blocking_clause(assignments: dict[int,Any]) -> Clause:
     return Clause(pos, neg)
 
 
-def find_all_SAT(clauses: list[Clause]) -> list[dict[int,None]]:
+def find_all_SAT(clauses: list[Clause]) -> list[dict[int, int]]:
     '''
     Find all satisfying assignments for a boolean function in CNF.
     '''
-    solutions: list[dict[int,None]] = []
+    solutions: list[dict[int, int]] = []
     # Use the DPLL algorithm to find all solutions
     while (solution := dpll_iterative(clauses)):
         # Add the current solution to the list of solutions
@@ -675,47 +689,47 @@ def test_str_CNF():
     print("Testing Clause.str_CNF()")
 
     c = Clause([],[])
-    assert(c.str_CNF() == '()')
+    assert(c.str_CNF() == '')
     assert(c.str_CNF(False) == '')
 
     c = Clause([], [], {0})
-    assert(c.str_CNF() == '(0)')
+    assert(c.str_CNF() == '0')
     assert(c.str_CNF(False) == '0')
 
     c = Clause([], [], {1})
-    assert(c.str_CNF() == '(1)')
+    assert(c.str_CNF() == '1')
     assert(c.str_CNF(False) == '1')
 
     c = Clause([], [], {0, 1})
-    assert(c.str_CNF() == '(0 + 1)')
+    assert(c.str_CNF() == '0 + 1')
     assert(c.str_CNF(False) == '0 . 1')
 
     c = Clause({1}, [])
-    assert(c.str_CNF() == '(x1)')
+    assert(c.str_CNF() == 'x1')
     assert(c.str_CNF(False) == 'x1')
 
     c = Clause([], {1})
-    assert(c.str_CNF() == '(~x1)')
+    assert(c.str_CNF() == '~x1')
     assert(c.str_CNF(False) == '~x1')
 
     c = Clause({1}, {1})
-    assert(c.str_CNF() == '(x1 + ~x1)')
+    assert(c.str_CNF() == 'x1 + ~x1')
     assert(c.str_CNF(False) == 'x1 . ~x1')
 
     c = Clause({1, 2}, {2, 3})
-    assert(c.str_CNF() == '(x1 + x2 + ~x2 + ~x3)')
+    assert(c.str_CNF() == 'x1 + x2 + ~x2 + ~x3')
     assert(c.str_CNF(False) == 'x1 . x2 . ~x2 . ~x3')
 
     c = Clause({1, 2}, {2, 3}, {1})
-    assert(c.str_CNF() == '(1 + x1 + x2 + ~x2 + ~x3)')
+    assert(c.str_CNF() == '1 + x1 + x2 + ~x2 + ~x3')
     assert(c.str_CNF(False) == '1 . x1 . x2 . ~x2 . ~x3')
 
     c = Clause({1, 2}, {2, 3}, {0})
-    assert(c.str_CNF() == '(0 + x1 + x2 + ~x2 + ~x3)')
+    assert(c.str_CNF() == '0 + x1 + x2 + ~x2 + ~x3')
     assert(c.str_CNF(False) == '0 . x1 . x2 . ~x2 . ~x3')
 
     c = Clause({1, 2}, {2, 3}, {1, 0})
-    assert(c.str_CNF() == '(0 + 1 + x1 + x2 + ~x2 + ~x3)')
+    assert(c.str_CNF() == '0 + 1 + x1 + x2 + ~x2 + ~x3')
     assert(c.str_CNF(False) == '0 . 1 . x1 . x2 . ~x2 . ~x3')
 
 def test_clause_value():
@@ -1149,7 +1163,7 @@ def read_sop_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
     return cnf1, cnf2
 
 
-def print_result(result: list[dict[int,None]], all_sat: bool):
+def print_result(result: list[dict[int, int]], all_sat: bool):
     '''
     Function to print the result SAT or UNSAT.
     '''
