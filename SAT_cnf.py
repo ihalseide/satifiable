@@ -3,7 +3,15 @@ from typing import Any
 import random
 import argparse
 from sys import stderr, argv, exit
-from copy import deepcopy
+
+
+'''
+Terminology notes:
+- SOP stands for "Sum of Products", is equivalent to DNF
+- POS stands for "Product of Sums", is equivalent to CNF
+- DNF stands for "Disjunctive Normal Form", is equivalent to SOP
+- CNF stands for "Conjunctive Normal Form", is equivalent to POS
+'''
 
 
 # Two defined values for literals (the polarity)
@@ -18,7 +26,8 @@ UNDECIDED = 'UNDECIDED'
 
 class Clause:
     '''
-    Clause class, which represents a clause in (CNF) Conjunctive Normal Form.
+    Clause class, which represents a clause in (CNF) Conjunctive Normal Form
+    (although it is sometimes used as a convenient container for SOP terms).
 
     When this class is used in the SAT-search algorithms, a CNF clause goes to the inverted/negated boolean function ~F,
     which means that SAT will actually be looking for assignments that set all clauses to have a value of 0, which makes
@@ -43,24 +52,20 @@ class Clause:
         self.literals: set[int] = set(literals)
         #self.isUnit = False
 
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Clause):
             return NotImplemented
         return (self.positives == other.positives) and (self.negatives == other.negatives) and (self.literals == other.literals)
 
+
     def __str__(self) -> str:
-        '''
-        Get a readable string version of this clause.
-        This method gets called automatically by str().
-        '''
         return f"Clause(positives={self.positives}, negatives={self.negatives}, literals={self.literals})"
 
+
     def __repr__(self) -> str:
-        '''
-        String representation for a clause, just use the same readable version.
-        This method is called automatically by repr() and str().
-        '''
         return self.__str__()
+
 
     def remove_var(self, xi: int):
         '''Remove a variable from the clause.'''
@@ -70,23 +75,27 @@ class Clause:
         try: self.negatives.remove(xi)
         except KeyError: pass
 
+
     def contains(self, xi: int) -> bool:
         '''
         Returns True only if this Clause contains the given variable (index).
         '''
         return (xi in self.positives) or (xi in self.negatives)
     
+
     def vars(self) -> set[int]:
         '''
         Get the set of all variables in this clause.
         '''
         return set.union(self.positives, self.negatives)
     
+
     def var_polarities(self) -> dict[int, int|str|None]:
         '''
         Get the list of pairs where each pair is (variable, polarity).
         '''
         return { i: self.var_polarity(i) for i in self.vars() }
+
 
     def var_polarity(self, xi:int) -> int|str|None:
         '''
@@ -94,12 +103,12 @@ class Clause:
         '''
         pos = xi in self.positives
         neg = xi in self.negatives
-        if pos and not neg:
-            return POS_LIT
+        if neg and pos:
+            return 'BOTH'
         elif neg and not pos:
             return NEG_LIT
-        elif neg and pos:
-            return 'BOTH'
+        elif pos and not neg:
+            return POS_LIT
         else:
             return None
 
@@ -144,6 +153,7 @@ class Clause:
         assigned = set(assignments.keys())
         return self.vars().difference(assigned)
         
+
     def value_cnf(self, assignments: dict[int,int]) -> str:
         '''
         Return the value this as a CNF clause if it has given the assignments.
@@ -250,7 +260,7 @@ def parse_SOP_string(text: str) -> list[Clause]: # list of product terms, not CN
     - "." optional for logical and, otherwise logical and is implicit
 
     Return value: a list of `Clause`s, BUT they are NOT CNF clauses!!!
-        They are product terms (DNF clauses).
+        They are product terms (SOP/DNF clauses).
 
     NOTE: this function parses pretty greedily and optimistically and may accept and
         parse strings that are not exactly in the right syntax, such as with double
@@ -1036,7 +1046,7 @@ def test_SAT_cnf():
 
 def print_clauses_as_DIMACS(clauses: list[Clause]):
     '''
-    Print the given clauses in DIMACS format.
+    Print the given CNF clauses in DIMACS format.
     '''
     # Get the maximum variable index
     max_var_i = find_max_var(clauses)
@@ -1173,18 +1183,14 @@ def read_sop_xor(file_path: str) -> tuple[ClauseList, ClauseList]:
     return cnf1, cnf2
 
 
-def parenthesize(t: str) -> str:
-    return f"({t})"
-
-
 def SOP_to_string(sop_clauses: list[Clause]) -> str:
     sorted_clauses = sorted(sop_clauses, key=lambda c: len(c.vars()))
-    return " + ".join([parenthesize(c.str_SOP()) for c in sorted_clauses])
+    return " + ".join([f"({c.str_SOP()})" for c in sorted_clauses])
 
 
 def CNF_to_string(cnf_clauses: list[Clause]) -> str:
     sorted_clauses = sorted(cnf_clauses, key=lambda c: len(c.vars()))
-    return ".".join([parenthesize(c.str_CNF()) for c in sorted_clauses])
+    return ".".join([f"({c.str_CNF()})" for c in sorted_clauses])
 
 
 def func_assignment_to_string(var_set: set[int], assignments: dict[int, int]) -> str:
@@ -1198,7 +1204,7 @@ def func_assignment_to_string(var_set: set[int], assignments: dict[int, int]) ->
 def main():
     is_sop_input = False
     if is_sop_input:
-        # SOP string
+        # SOP string input
         txt = "x1.~x3.~x4 + x2.~x1.x5 + x1.~x5.~x3.~x4"
         sop = parse_SOP_string(txt)
         print("SOP:", SOP_to_string(sop))
@@ -1206,6 +1212,10 @@ def main():
         cnf = convert_SOP_to_CNF(sop)
         print("CNF:", CNF_to_string(cnf))
         solutions = find_all_SAT(cnf)
+        if solutions:
+            print("Function is SAT with these assignments:")
+        else:
+            print("Function is UNSAT")
         for sol in solutions:
             print(func_assignment_to_string(variables, sol))
     else:
@@ -1214,6 +1224,10 @@ def main():
         variables = clauses_all_vars(cnf)
         print("CNF:", CNF_to_string(cnf))
         solutions = find_all_SAT(cnf)
+        if solutions:
+            print("Function is SAT with these assignments:")
+        else:
+            print("Function is UNSAT")
         for sol in solutions:
             print(func_assignment_to_string(variables, sol))
 
