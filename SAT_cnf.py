@@ -134,26 +134,45 @@ class Clause:
             return " . ".join(string_literals)
         
     def value_cnf(self, assignments: dict[int,int]) -> str:
-        '''Return the value this CNF clause has given the assignments.'''
+        '''
+        Return the value this as a CNF clause if it has given the assignments.
+        - A clause is SAT if at least ONE literal evaluates to True
+        - A clause is UNSAT if all literals evaluate to False
+        - A clause is UNDECIDED if at least ONE literal is unassigned (This includes "unit" Clauses)
+        '''
         # SAT if clause is empty
         if not self.positives and not self.negatives and not self.literals:
             return SAT
         # SAT if clause has a literal 1
         if 1 in self.literals:
             return SAT
-        # SAT if any positive literal is 1
+        has_unassigned_var = False
+        # SAT if any positive literal is 1.
+        # If the end of this for loop is reached, then all positive literals are either 0 or undecided.
         for pos_xi in self.positives:
-            if assignments.get(pos_xi) == 1:
+            val = assignments.get(pos_xi)
+            if val == 1:
                 return SAT
-        # SAT if any negative literal is 0
+            elif val is None:
+                has_unassigned_var = True
+        # SAT if any negative literal is 0.
+        # If the end of this for loop is reached, then all negative literals are either 1 or undecided.
         for neg_xi in self.negatives:
-            if assignments.get(neg_xi) == 0:
+            val = assignments.get(neg_xi)
+            if val == 0:
                 return SAT
-        return UNSAT
+            elif val is None:
+                has_unassigned_var = True
+        # UNDECIDED if no positive literals are 1 and no negative literals are 0 and there is at least one unassigned variable.
+        # UNSAT if no positive literals are 1 and no negative literals are 0 and there are no unassigned variables.
+        if has_unassigned_var:
+            return UNDECIDED
+        else:
+            return UNSAT
 
-    def neg_value_cnf(self, assignments: dict[int,int]) -> int|str:
+    def neg_value_cnf(self, assignments: dict[int,int]) -> str:
         '''Return the negated/inverted value this CNF clause has given the assignments.'''
-        return value_negation(self.value_cnf(assignments))
+        return sat_val_negation(self.value_cnf(assignments))
 
 
 class ClauseList:
@@ -187,13 +206,20 @@ class ClauseList:
     def printClauseList(self):
         print(self.sop_clauses)
 
-def value_negation(x):
+def literal_val_negation(x):
     '''
     Negate POS_LIT and NEG_LIT, otherwise keep the value.
     '''
     if x == POS_LIT: return NEG_LIT
     elif x == NEG_LIT: return POS_LIT
     else: return x
+
+def sat_val_negation(x:str) -> str:
+    '''Invert/negate SAT vs UNSAT'''
+    if x == SAT: return UNSAT
+    elif x == UNSAT: return SAT
+    elif x == UNDECIDED: return UNDECIDED
+    raise ValueError(f"x must be SAT or UNSAT but is \"{x}\"")
 
 def parse_SOP_string(text: str) -> list[Clause]: # not CNF clauses!
     '''
@@ -321,58 +347,6 @@ def add_GCF_for_or(toList: list[Clause], or_input_vars, output_var: int):
     #    [SUM(over i=1 to n, of xi) + ~z]
     # In this part, we invert each literals' polarity between positive/negative
     toList.append(Clause(list(or_input_vars), [output_var]))
-
-
-def clause_value(clause: Clause, assignments: dict) -> str:
-    '''
-    Function to determine if clause is UNSAT or UNDECIDED.
-    A clause is SAT if at least ONE literal evaluates to True
-    A clause is UNSAT if all literals evaluate to False
-    A clause is UNDECIDED if at least ONE literal is unassigned (This includes Unit Clauses)
-    
-    - Return `SAT` if clause is SAT
-    - Return `UNSAT` if clause is UNSAT
-    - Return `UNDECIDED` if clause is UNDECIDED
-    '''
-    # Get the list of literals from the given clause
-    list_of_literals = list(clause.variables())
-
-    # Keep track of number of literals that evaluate to False
-    countFalse = 0
-
-    # Loop through the lists and compare the literal in the clause
-    # with it's corresponding dictionary value
-    # Returns a dictionary of the literal and it's value within the clause
-    literals_and_assignments: dict = values_of_literals(clause, assignments)
-
-    # Count number of 0's assigned in the clause
-    # A clause is UNSAT if all literals are false.
-    for val in literals_and_assignments.values():
-
-        # Count the amount of 0's in a given clause
-        if val == NEG_LIT:
-            countFalse += 1
-        
-        # Return 'SAT' if any literal is 1. This means the clause is SAT
-        elif val == POS_LIT:
-            return SAT
-    
-    # Specific case for unit clauses:
-        # If the amount of 0's in a given clause 
-        # is equal to the number of literal in a clause minus 1,
-        # then one literal is unassigned, which makes it a unit clause
-        # If the clause has one literal that is unassigned, then it is a unit clause
-    if countFalse == len(list_of_literals) - 1:
-        clause.isUnit = True
-
-    # If the amount of 0's counted in the given clause is equal to the number of
-    # literals in the given clause then we know that all literals are 0.
-    # This means the clause evaluates to False and is UNSAT.
-    if countFalse == len(list_of_literals):
-        return UNSAT
-    
-    # If were here then clause must be UNDECIDED since no other condition is met
-    return UNDECIDED
 
 
 def find_maximum_literal(clauses: list[Clause]) -> int:
@@ -514,7 +488,7 @@ def dpll_rec(clauses: list[Clause], assignments: dict[int,Any]|None=None) -> dic
     # Call unit_propagate() to SAT any unit clauses
     anyUndecidedClause: bool = False
     for clause in original_clauses:
-        value = clause_value(clause, assignments)
+        value = clause.value_cnf(assignments)
         if value == UNSAT:
             # If any clause is UNSAT, then the whole function is UNSAT.
             return {} # UNSAT
@@ -580,7 +554,7 @@ def dpll_iterative(clauses: list[Clause]) -> dict[int,Any]:
         anyUndecidedClause: bool = False
         anUNSATClause: Clause|None = None
         for clause in original_clauses:
-            value = clause_value(clause, current_assignments)
+            value = clause.value_cnf(current_assignments)
             if value == UNSAT:
                 # If any clause is UNSAT, then the whole function is UNSAT.
                 anUNSATClause = clause
@@ -763,36 +737,36 @@ def test_str_CNF():
 
 def test_clause_value():
     '''
-    Test the clause_value() function
+    Test the Clause.value_cnf() function
     '''
     # test one positive literal (x1)
     c = Clause([1], [])
 
     # postive literal is set to 1
-    v = clause_value(c, {1:1})
+    v = c.value_cnf({1:1})
     assert(v == SAT)
 
     # Setting clause with only one literal to 0
-    v = clause_value(c, {1:0})
+    v = c.value_cnf({1:0})
     assert(v == UNSAT)
 
     # The only literal is undecided
-    v = clause_value(c, {1:None})
+    v = c.value_cnf({1:None})
     assert(v == UNDECIDED)
 
     # Test one negative literal (~x1)
     c = Clause([], [1])
 
     # assign the literal to 1, which makes the clause false
-    v = clause_value(c, {1:1})
+    v = c.value_cnf({1:1})
     assert(v == UNSAT)
 
     # assign the literal to 0, which makes the clause true
-    v = clause_value(c, {1:0})
+    v = c.value_cnf({1:0})
     assert(v == SAT)
 
     # The only literal is undecided
-    v = clause_value(c, {1:None})
+    v = c.value_cnf({1:None})
     assert(v == UNDECIDED)
 
     # Test a clause with 2 literals
@@ -809,7 +783,7 @@ def test_clause_value():
         ({1:None, 2:1}, SAT),
     ]
     for assignment, expected in testPairs2:
-        actual = clause_value(c, assignment)
+        actual = c.value_cnf(assignment)
         try:
             assert(actual == expected)
         except AssertionError:
@@ -833,7 +807,7 @@ def test_clause_value():
         ({1:None, 2:0, 3:None}, UNDECIDED),
     ]
     for assignment, expected in testPairs3:
-        v = clause_value(c, assignment)
+        v = c.value_cnf(assignment)
         try:
             assert(v == expected)
         except AssertionError:
