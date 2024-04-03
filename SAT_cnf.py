@@ -47,10 +47,10 @@ class Clause:
         - `literals` = set of literal 1's or 0's values already in the clause
 
         Examples:
-        - Clause([1,2,4], [3,5]) represents the CNF clause: "(x1 + x2 + ~x3 + x4 + ~x5)"
-        - Clause([3,2], []) represents the CNF clause: "(x3 + x2)"
-        - Clause([], [6]) represents the CNF clause: "(~x6)"
-        - Clause([], []) represents an (empty) CNF clause: "()"
+        - `Clause([1,2,4], [3,5])` represents the CNF clause: "(x1 + x2 + ~x3 + x4 + ~x5)"
+        - `Clause([3,2], [])` represents the CNF clause: "(x3 + x2)"
+        - `Clause([], [6])` represents the CNF clause: "(~x6)"
+        - `Clause([], [])` represents an (empty) CNF clause: "()"
         '''
         self.positives: set[int] = set(positives)
         self.negatives: set[int] = set(negatives)
@@ -71,7 +71,8 @@ class Clause:
         '''
         return self.__str__()
 
-    def remove(self, xi: int):
+    def remove_var(self, xi: int):
+        '''Remove a variable from the clause.'''
         try: self.positives.remove(xi)
         except KeyError: pass
 
@@ -80,11 +81,11 @@ class Clause:
 
     def contains(self, xi: int) -> bool:
         '''
-        Returns true if this Clause contains the given variable (index).
+        Returns True only if this Clause contains the given variable (index).
         '''
         return (xi in self.positives) or (xi in self.negatives)
     
-    def variables(self) -> set[int]:
+    def vars(self) -> set[int]:
         '''
         Get the set of all variables in this clause.
         '''
@@ -94,7 +95,7 @@ class Clause:
         '''
         Get the list of pairs where each pair is (variable, polarity).
         '''
-        return { i: self.var_polarity(i) for i in self.variables() }
+        return { i: self.var_polarity(i) for i in self.vars() }
 
     def var_polarity(self, xi:int) -> int|str|None:
         '''
@@ -118,7 +119,7 @@ class Clause:
         return Clause(self.negatives.copy(), self.positives.copy(), self.literals.copy())
     
     def str_CNF(self, is_CNF=True):
-        all = sorted(self.variables())
+        all = sorted(self.vars())
         string_literals = []
         for lit in self.literals:
             string_literals.append(str(lit))
@@ -195,7 +196,7 @@ class ClauseList:
         self.max_index_sop = 0
         for i in self.sop_clauses:
             # Get the max variable index in the list of keys from the clause
-            if max(list(i.variables())) == self.input_max:
+            if max(list(i.vars())) == self.input_max:
                 break
             else:
                 self.max_index_sop += 1
@@ -206,6 +207,7 @@ class ClauseList:
     def printClauseList(self):
         print(self.sop_clauses)
 
+
 def literal_val_negation(x):
     '''
     Negate POS_LIT and NEG_LIT, otherwise keep the value.
@@ -214,12 +216,22 @@ def literal_val_negation(x):
     elif x == NEG_LIT: return POS_LIT
     else: return x
 
+
 def sat_val_negation(x:str) -> str:
     '''Invert/negate SAT vs UNSAT'''
     if x == SAT: return UNSAT
     elif x == UNSAT: return SAT
     elif x == UNDECIDED: return UNDECIDED
     raise ValueError(f"x must be SAT or UNSAT but is \"{x}\"")
+
+
+def clauses_all_vars(clauses:list[Clause]) -> set[int]:
+    '''Get the set of all variables in a given list of Clauses'''
+    result = set()
+    for clause in clauses:
+        result.update(clause.vars())
+    return result
+
 
 def parse_SOP_string(text: str) -> list[Clause]: # not CNF clauses!
     '''
@@ -355,20 +367,22 @@ def find_maximum_literal(clauses: list[Clause]) -> int:
     This is useful for knowing the upper limit of how many variables there are in a boolean function.
     Also useful for finding the output variable index.
     '''
-    return max([max(clause.variables()) for clause in clauses])
+    return max([max(clause.vars()) for clause in clauses])
 
 
-def decide_literal(clauses: list[Clause], decisions: dict) -> int|None:
+def decide_literal(literal_set:set[int], decisions: dict) -> int|None:
     '''
     Choose an unassigned literal to try next.
-    Returns the index of the literal to try next, or None if there are no undecided literals.
+    The `literal_set` is the set of literals allowed to be chosen from.
+    Returns the index of the literal to try next, or `None` if there are no undecided literals.
     '''
-    # NOTE: this doesn't use the clauses at all (yet), but it could be modified to use them.
-    undecided = [xi for xi, value in decisions.items() if value is None]
-    if not undecided:
+    assigned = set(decisions.keys())
+    unassigned = literal_set.difference(assigned)
+    if unassigned:
+        return random.choice(tuple(unassigned))
+    else:
         return None
-    # For now, just choose a random undecided variable.
-    return random.choice(undecided)
+
 
 def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> dict[int, int|None]:
     '''
@@ -386,7 +400,7 @@ def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> d
         # If there is a unit clause in the list, assign 0 or 1 to the literal depending on the polarity
         if clauses[i].isUnit == True:
             for lit, val in assignments.items():
-                if (val == None) and (lit in clauses[i].variables()):
+                if (val == None) and (lit in clauses[i].vars()):
                     if clauses[i].var_polarity(lit) == POS_LIT and assignments[lit] == None: 
                         assignments[lit] = 1 # Only assigning the unassigned literal
                         polarity = POS_LIT # Save the polarity of the literal to determine which complement to remove from the other clauses
@@ -402,14 +416,14 @@ def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> d
                             for k, _ in clauses[j].var_polarities().items():
                                 # If literal is the complement of the literal that just made the unit clause SAT...
                                 if (k == lit) and (clauses[j].var_polarity(k) == POS_LIT):
-                                    clauses[j].remove(k) # Remove the complement literal
+                                    clauses[j].remove_var(k) # Remove the complement literal
                                     break # Removed complement. No need to iterate further in the clause
                         # if the literal that just made the unit clause SAT is in this current clause and is xi
                         elif (clauses[j].contains(lit)) and (polarity == POS_LIT):
                             for k, _ in clauses[j].var_polarities().items():
                                 # If literal is the complement of the literal that just made the unit clause SAT...
                                 if (k == lit) and (clauses[j].var_polarity(k) == NEG_LIT):
-                                    clauses[j].remove(k) # Remove the complement literal
+                                    clauses[j].remove_var(k) # Remove the complement literal
                                     break # Removed complement. No need to iterate further in the clause
                     # Removed clause. No need to further iterate
                     break
@@ -418,20 +432,19 @@ def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> d
     return assignments
 
 
+def dpll_rec(clauses: list[Clause], assignments: dict[int, int] | None = None, var_set: set[int] | None = None) -> dict[int, int]:
     '''
     The recursive function implementation for dpll().
     Takes in a list of CNF clauses and a dictionary of decisions.
     Returns: the assignments for literals that make the SAT problem true,
     which is an empty dictionary if the function is UNSAT.
 
-    NOTE: DON'T remove this function because it is useful for validating the iterative version !!!
+    NOTE: keep this function because it is useful for validating the iterative version !!!
     '''
-    # global for saving the original list of clauses derived
-    global original_clauses
-    # Make a copy of the clauses to use to evaluate the clauses
-    original_clauses = deepcopy(clauses)
-    if not assignments:
-        assignments = all_undecided(clauses)
+    # By default, assignments are empty (vars are all unassigned).
+    assignments = dict() if assignments is None else assignments
+    # By default work with all variables that are present in the clauses.
+    var_set = clauses_all_vars(clauses) if var_set is None else var_set
     # Base cases:
     # - if all clauses are SAT, then then the function is SAT.
     # - if any clause is UNSAT, then the function is UNSAT.
@@ -440,7 +453,7 @@ def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> d
         return assignments # SAT
     # Call unit_propagate() to SAT any unit clauses
     anyUndecidedClause: bool = False
-    for clause in original_clauses:
+    for clause in clauses:
         value = clause.value_cnf(assignments)
         if value == UNSAT:
             # If any clause is UNSAT, then the whole function is UNSAT.
@@ -448,54 +461,64 @@ def unit_propagate(clauses: list[Clause], assignments: dict[int, int|None]) -> d
         elif value == UNDECIDED:
             # We only need to see that one clause is undecided to know if any are undecided.
             anyUndecidedClause = True
-            if clause.isUnit == True:
-                assignments = unit_propagate(clauses, assignments)
-    if not anyUndecidedClause:
+            #if clause.isUnit == True:
+            #    assignments = unit_propagate(clauses, assignments)
+    if anyUndecidedClause:
+        # At least one of the clauses is undecided.
+        # Choose a literal to try to assign to 1 or to 0...
+        # And try those options out by branching recursively.
+        xi: int|None = decide_literal(var_set, assignments)
+        if xi is None:
+            # There are no undecided literals, so we can't make any more decisions.
+            # This means that the function is UNSAT.
+            return {}
+        # Try xi=1
+        assignments[xi] = 1
+        if (result := dpll_rec(clauses, assignments)):
+            # SAT
+            return result
+        # Try xi=0
+        assignments[xi] = 0
+        if (result := dpll_rec(clauses, assignments)):
+            # SAT
+            return result
+        # If both xi=1 and xi=0 failed, then this whole recursive branch is UNSAT.
+        # So return UNSAT to the callee (probably the previous recursive call).
+        del assignments[xi] # undo the decision
+        return {} # UNSAT
+    else:
         # If no clauses are UNSAT and no clauses are undecided,
         # then all clauses are SAT and the whole function is SAT!
         return assignments # SAT
 
-    # At this point, at least one of the clauses is undecided.
-    # Choose a literal to try to assign to 1 or to 0...
-    # And try those options out by branching recursively.
-    xi: int|None = decide_literal(clauses, assignments)
-    if not xi:
-        # There are no undecided literals, so we can't make any more decisions.
-        # This means that the function is UNSAT.
-        return {}
-    assert(assignments[xi] is None)
-    # Try xi=1
-    assignments[xi] = 1
-    if (result := dpll_rec(clauses, assignments)):
-        # SAT
-        return result
-    # Try xi=0
-    assignments[xi] = 0
-    if (result := dpll_rec(clauses, assignments)):
-        # SAT
-        return result
-    # If both xi=1 and xi=0 failed, then this whole recursive branch is UNSAT.
-    # So return UNSAT to the callee (probably the previous recursive call).
-    assignments[xi] = None # undo the decision
-    return {} # UNSAT
+
+def dpll_rec_neg(clauses: list[Clause], var_set: set[int]) -> dict[int, int]:
+    '''
+    Does a DPLL SAT recursive search on the list of clauses for a boolean function,
+    but with the meanings of SAT/UNSAT inverated/negated.
+    '''
+    raise NotImplementedError()
 
 
-def dpll_iterative(clauses: list[Clause]) -> dict[int,Any]:
+def dpll_iterative(clauses:list[Clause], var_set:set[int]|None=None) -> dict[int,Any]:
     '''
     Implementation of DPLL using a loop instead of recursion.
     '''
     # global for saving the original list of clauses derived
-    global original_clauses
+    #global original_clauses
     # Make a copy of the clauses to use to evaluate the clauses
-    original_clauses = deepcopy(clauses)
+    #original_clauses = deepcopy(clauses)
     if not clauses:
         # Edge case where clauses is empty.
         # It's not possible to make any decisions/assignments, so return empty dictionary,
         # which is considered UNSAT.
         return {}
-    assignments1 = all_undecided(clauses)
-    assignments2 = assignments1.copy()
-    starting_xi = decide_literal(clauses, assignments1)
+    if var_set is None:
+        # By default work with all variables that are present in the clauses.
+        var_set = clauses_all_vars(clauses) 
+    assignments1: dict[int,int] = {} # all variables are unassigned
+    assignments2: dict[int,int] = {} # all variables are unassigned
+    starting_xi = decide_literal(var_set, assignments1)
     assert(starting_xi)
     assignments1[starting_xi] = 1
     assignments2[starting_xi] = 0
@@ -506,7 +529,7 @@ def dpll_iterative(clauses: list[Clause]) -> dict[int,Any]:
         current_assignments = stack.pop()
         anyUndecidedClause: bool = False
         anUNSATClause: Clause|None = None
-        for clause in original_clauses:
+        for clause in clauses:
             value = clause.value_cnf(current_assignments)
             if value == UNSAT:
                 # If any clause is UNSAT, then the whole function is UNSAT.
@@ -515,7 +538,7 @@ def dpll_iterative(clauses: list[Clause]) -> dict[int,Any]:
             elif (not anyUndecidedClause) and (value == UNDECIDED):
                 # We only need to see that one clause is undecided to know if any are undecided.
                 anyUndecidedClause = True
-                current_assignments = unit_propagate(clauses, current_assignments)
+                #current_assignments = unit_propagate(clauses, current_assignments)
 
         # This should be checked before anyUndecidedClause, because UNSAT takes precedence over UNDECIDED.
         if anUNSATClause is not None:
@@ -530,12 +553,11 @@ def dpll_iterative(clauses: list[Clause]) -> dict[int,Any]:
         else:
             # At this point, at least one of the clauses is undecided,
             # So lets add two decisions to the stack to try next...
-            xi = decide_literal(clauses, current_assignments)
-            if not xi:
+            xi = decide_literal(var_set, current_assignments)
+            if xi is None:
                 # There are no undecided literals, so we can't make any more decisions.
                 # This means that the function is UNSAT.
                 return {} # UNSAT
-            assert(current_assignments[xi] is None)
             # Try xi=1
             # (We don't need to make a copy of the current_assignments dictionary,
             #   because it is not used again after this loop iteration.)
@@ -548,6 +570,14 @@ def dpll_iterative(clauses: list[Clause]) -> dict[int,Any]:
             stack.append(assignments2)
     # UNSAT due to no more possible assignments on the stack
     return {} # UNSAT
+
+
+def dpll_iterative_neg(clauses: list[Clause], var_set: set[int]) -> dict[int, int]:
+    '''
+    Does a DPLL SAT search on the list of clauses for a boolean function,
+    but with the meanings of SAT/UNSAT inverated/negated.
+    '''
+    raise NotImplementedError()
 
 
 def make_blocking_clause(assignments: dict[int,Any]) -> Clause:
@@ -811,6 +841,26 @@ def test_dpll(dpll_func):
     assert(result)
     assert(result == {1: 0, 2: 0})
 
+    # Test 1 clause with 2 literals
+    clauses = [ Clause([1, 2], []) ] # (x1 + x2)
+    result = dpll_func(clauses)
+    assert(result)
+    assert(result.get(1) == 1 or result.get(2) == 1)
+
+    # Test 2 clause with 2 literals
+    clauses = [ Clause([1, 2], []), Clause([], [1, 2]) ] # (x1 + x2).(~x1 + ~x2)
+    result = dpll_func(clauses)
+    assert(result)
+    assert(result.get(1) == 1 or result.get(2) == 1)
+    assert(result.get(1) == 0 or result.get(2) == 0)
+
+    # Test 2 clause with 2 literals
+    clauses = [ Clause([2], [1]), Clause([1], [2]) ] # (~x1 + x2).(x1 + ~x2)
+    result = dpll_func(clauses)
+    assert(result)
+    assert((result.get(1) == 1 and result.get(2) == 1)
+           or (result.get(1) == 0 and result.get(2) == 0))
+
 
 def test_parse_SOP_string():
     print('Testing parse_SOP_string()')
@@ -911,20 +961,20 @@ def test_convert_SOP_to_CNF_neg():
         # positive clauses
         sop = [ Clause([xi], []) ] # "xi"
         cnf = convert_SOP_to_CNF_neg(sop)
-        assert(cnf[0].variables() == {xi})
+        assert(cnf[0].vars() == {xi})
         assert(cnf[0].var_polarity(xi) == NEG_LIT)
 
         # negative clauses
         sop = [ Clause([], [xi]) ] # "xi"
         cnf = convert_SOP_to_CNF_neg(sop)
-        assert(cnf[0].variables() == {xi})
+        assert(cnf[0].vars() == {xi})
         assert(cnf[0].var_polarity(xi) == POS_LIT)
 
     # try a single SOP clause with 2 variables
     sop = [ Clause([1, 2], []) ] # "x1 . x2"
     cnf = convert_SOP_to_CNF_neg(sop) # should be "(x1)(x2)"
     assert(len(cnf) == 1)
-    assert(cnf[0].variables() == {1, 2})
+    assert(cnf[0].vars() == {1, 2})
     assert(cnf[0].var_polarity(1) == NEG_LIT)
     assert(cnf[0].var_polarity(2) == NEG_LIT)
 
@@ -932,14 +982,14 @@ def test_convert_SOP_to_CNF_neg():
     sop = [ Clause([1], [2]) ] # "x1 . ~x2"
     cnf = convert_SOP_to_CNF_neg(sop) # should be "(x1)(~x2)"
     assert(len(cnf) == 1)
-    assert(cnf[0].variables() == {1, 2})
+    assert(cnf[0].vars() == {1, 2})
     assert(cnf[0].var_polarity(1) == NEG_LIT)
     assert(cnf[0].var_polarity(2) == POS_LIT)
 
     # try a single SOP clause with conflicting variables
     sop = [ Clause([99], [99]) ] # "xi . ~xi"
     cnf = convert_SOP_to_CNF_neg(sop) # should be "(xi . ~x1)""
-    assert(cnf[0].variables() == {99})
+    assert(cnf[0].vars() == {99})
     assert(cnf[0].var_polarity(99) == 'BOTH')
 
     # convert 2 clauses each with 2 vars
